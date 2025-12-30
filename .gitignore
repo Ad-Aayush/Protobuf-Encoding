@@ -3,6 +3,7 @@ a.out
 tests_bin
 *.o
 *.d
+build/
 
 # Caches
 .cache

@@ -3,26 +3,43 @@ CXXFLAGS := -std=c++20 -O0 -g -Wall -Wextra -Wpedantic
 CPPFLAGS := -I. \
             -Ithird_party/googletest/googletest/include \
             -Ithird_party/googletest/googletest
-LDFLAGS :=
 LDLIBS := -pthread
 
-GTEST_DIR := third_party/googletest/googletest
-GTEST_SRCS := $(GTEST_DIR)/src/gtest-all.cc
+BUILD := build
 
-SRCS := encoder.cpp proto_desc.cpp message_encoder.cpp tests.cpp
+GTEST_DIR := third_party/googletest/googletest
+GTEST_SRC := $(GTEST_DIR)/src/gtest-all.cc
+
+SRCS_CPP := encoder.cpp proto_desc.cpp message_encoder.cpp tests.cpp
+SRCS := $(SRCS_CPP) $(GTEST_SRC)
+
+# Map source paths -> build/<source path>.o (preserves directories)
+OBJS := $(patsubst %,$(BUILD)/%.o,$(SRCS))
+DEPS := $(OBJS:.o=.d)
+
 BIN := tests_bin
 
 .PHONY: all test clean
 
 all: $(BIN)
 
-# This rule intentionally recompiles everything when you run `make`:
-# (No object files, just one compile+link command.)
-$(BIN): $(SRCS) $(GTEST_SRCS)
-	$(CXX) $(CXXFLAGS) $(CPPFLAGS) $^ $(LDLIBS) -o $@
+$(BIN): $(OBJS)
+	$(CXX) $(OBJS) $(LDLIBS) -o $@
+
+# Compile any .cpp into build/<path>.o
+$(BUILD)/%.cpp.o: %.cpp
+	@mkdir -p $(dir $@)
+	$(CXX) $(CXXFLAGS) $(CPPFLAGS) -MMD -MP -c $< -o $@
+
+# Compile any .cc into build/<path>.o
+$(BUILD)/%.cc.o: %.cc
+	@mkdir -p $(dir $@)
+	$(CXX) $(CXXFLAGS) $(CPPFLAGS) -MMD -MP -c $< -o $@
+
+-include $(DEPS)
 
 test: $(BIN)
 	./$(BIN)
 
 clean:
-	rm -f $(BIN)
+	rm -rf $(BUILD) $(BIN)
