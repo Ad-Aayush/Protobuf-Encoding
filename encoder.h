@@ -11,6 +11,11 @@ std::vector<std::uint8_t> encodeVarint(std::uint64_t);
 std::pair<std::optional<std::uint64_t>, int>
 decodeVarint(const std::vector<std::uint8_t> &, int);
 
+// Signed varint (zigzag encoding for signed integers)
+std::vector<std::uint8_t> encodeSignedVarint(int64_t);
+std::pair<std::optional<int64_t>, int>
+decodeSignedVarint(const std::vector<uint8_t> &, int);
+
 // Fixed-width 64-bit (protobuf wire type 1 uses little-endian fixed64/double)
 std::vector<std::uint8_t> encodeFixed64(std::uint64_t);
 std::optional<std::uint64_t> decodeFixed64(const std::vector<std::uint8_t> &,

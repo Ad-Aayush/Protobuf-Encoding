@@ -68,6 +68,30 @@ TEST(Varint, DecodesFromOffsetAndAdvances) {
   EXPECT_EQ(j, (int)buf.size());
 }
 
+TEST(SignedVarint, RoundTripKeyValues) {
+  std::vector<int64_t> vals = {
+      0LL,          1LL,
+      -1LL,         10LL,
+      -10LL,        127LL,
+      -127LL,       128LL,
+      -128LL,       129LL,
+      -129LL,       150LL,
+      -150LL,      16383LL,
+      -16383LL,    16384LL,
+      -16384LL,    (1LL << 31),
+      -(1LL << 31), (1LL << 32),
+      -(1LL << 32), INT64_MAX,
+      INT64_MIN};
+
+  for (auto v : vals) {
+    auto enc = encodeSignedVarint(v);
+    auto [dec, next] = decodeSignedVarint(enc, 0);
+    ASSERT_TRUE(dec.has_value()) << "Failed to decode v=" << v;
+    EXPECT_EQ(*dec, v);
+    EXPECT_EQ(next, static_cast<int>(enc.size()));
+  }
+}
+
 TEST(Fixed64, RoundTrip) {
   std::vector<uint64_t> vals = {0ULL, 1ULL, 0x1122334455667788ULL,
                                 std::numeric_limits<uint64_t>::max()};
