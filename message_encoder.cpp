@@ -13,7 +13,8 @@ std::vector<uint8_t> encodeMessage(const Message &m) {
     switch (field.type) {
     case FieldType::Int: {
       // Tag handling
-      uint32_t tag = (field.number << 3) | WireType::VARINT;
+      uint64_t tag =
+          static_cast<uint64_t>((field.number << 3) | WireType::VARINT);
       std::vector<uint8_t> tagBytes = encodeVarint(tag);
       enc.insert(enc.end(), tagBytes.begin(), tagBytes.end());
       // Value handling
@@ -26,7 +27,7 @@ std::vector<uint8_t> encodeMessage(const Message &m) {
 
     case FieldType::Double: {
       // Tag handling
-      uint32_t tag = (field.number << 3) | WireType::I64;
+      uint64_t tag = static_cast<uint64_t>((field.number << 3) | WireType::I64);
       std::vector<uint8_t> tagBytes = encodeVarint(tag);
       enc.insert(enc.end(), tagBytes.begin(), tagBytes.end());
       // Value handling
@@ -39,7 +40,7 @@ std::vector<uint8_t> encodeMessage(const Message &m) {
 
     case FieldType::String: {
       // Tag handling
-      uint32_t tag = (field.number << 3) | WireType::LEN;
+      uint64_t tag = static_cast<uint64_t>((field.number << 3) | WireType::LEN);
       std::vector<uint8_t> tagBytes = encodeVarint(tag);
       enc.insert(enc.end(), tagBytes.begin(), tagBytes.end());
       // Value handling
@@ -57,51 +58,17 @@ std::vector<uint8_t> encodeMessage(const Message &m) {
     }
     }
   }
-  // Add some bytes to the start for the LEN type and the size of the message
-  std::vector<uint8_t> lenPrefix = encodeVarint(enc.size());
-  enc.insert(enc.begin(), lenPrefix.begin(), lenPrefix.end());
-
-  uint32_t tag = (0 << 3) | WireType::LEN;
-  std::vector<uint8_t> tagBytes = encodeVarint(tag);
-  enc.insert(enc.begin(), tagBytes.begin(), tagBytes.end());
-
   return enc;
 }
 
 std::pair<std::optional<Message>, int>
 decodeMessage(const std::vector<uint8_t> &data,
-              std::shared_ptr<const ProtoDesc> desc, int index = 0) {
+              std::shared_ptr<const ProtoDesc> desc) {
+  int index = 0;
   int sz = data.size();
   Message msg(desc);
-  // Match the tag
-  auto [maybeTag, nextIndex] = decodeVarint(data, index);
-  if (!maybeTag.has_value()) {
-    std::cout << "No tag\n";
-    return {std::nullopt, index};
-  }
 
-  uint32_t expectedTag = (0 << 3) | WireType::LEN; 
-  if (maybeTag.value() != expectedTag) {
-    std::cout << "Mismatch in tag\n";
-    return {std::nullopt, index};
-  }
-
-  index = nextIndex;
-  // Decode the length
-  auto [maybeLen, afterLenIndex] = decodeVarint(data, index);
-  if (!maybeLen.has_value()) {
-    std::cout << "Length not specified correctly\n";
-    return {std::nullopt, index};
-  }
-  uint64_t msgLen = maybeLen.value();
-  index = afterLenIndex;
-  int endIndex = index + msgLen;
-  if (endIndex > sz) {
-    std::cout << "Message too small\n";
-    return {std::nullopt, index};
-  }
-
-  while (index < endIndex) {
+  while (index < sz) {
     auto [maybeFieldTag, afterFieldTagIndex] = decodeVarint(data, index);
     if (!maybeFieldTag.has_value()) {
       std::cout << "No Tag for input field\n";
@@ -109,20 +76,53 @@ decodeMessage(const std::vector<uint8_t> &data,
     }
     index = afterFieldTagIndex;
     uint32_t fieldTag = maybeFieldTag.value();
-    std::cout << "|Field Tag: " << fieldTag << "|\n";
     uint32_t fieldNumber = fieldTag >> 3;
     uint32_t wireType = fieldTag & 0x7;
 
     auto maybeIndex = desc->indexByNumber(fieldNumber);
     if (!maybeIndex.has_value()) {
-      std::cout << "Field Information encoded incorrectly\n";
-      return {std::nullopt, index};
+      std::cout << "Field Information not found skipping...\n";
+      switch (wireType) {
+      case WireType::VARINT: {
+        auto [_tmp, endIndex] = decodeVarint(data, index);
+        if (_tmp.has_value() == false) {
+          return {std::nullopt, index};
+        }
+        index = endIndex;
+        break;
+      }
+      case WireType::I64: {
+        if (index + 8 > sz) {
+          return {std::nullopt, index};
+        }
+        index += 8; // fixed 8 bytes
+        break;
+      }
+
+      case WireType::LEN: {
+        auto [maybeSize, endStrIndex] = decodeVarint(data, index);
+        if (!maybeSize.has_value()) {
+          std::cout << "Length not properly encoded\n";
+          return {std::nullopt, index};
+        }
+        int size = static_cast<int>(maybeSize.value());
+        if (endStrIndex + size > sz) {
+          std::cout << "String length exceeds data size\n";
+          return {std::nullopt, index};
+        }
+        index = endStrIndex + size;
+        break;
+      }
+
+      default: {
+        return {std::nullopt, index};
+      }
+      }
+      continue;
     }
     size_t fieldIndex = maybeIndex.value();
     FieldType fieldType = desc->fields[fieldIndex].type;
     std::string fieldName = desc->fields[fieldIndex].name;
-    std::cout << "|Field Name: " << fieldName << "|\n";
-    std::cout << "|Wire Type: " << wireType << "|\n";
     switch (fieldType) {
     case FieldType::Int: {
       if (wireType != 0) {
@@ -134,7 +134,7 @@ decodeMessage(const std::vector<uint8_t> &data,
         std::cout << "Integer incorrectly encoded\n";
         return {std::nullopt, index};
       }
-      std::cout << ">|Int: " << maybeInt.value() << "|\n";
+      // std::cout << ">|Int: " << maybeInt.value() << "|\n";
       msg.set(fieldName, maybeInt.value());
       index = endIntIndex;
       break;
@@ -149,7 +149,7 @@ decodeMessage(const std::vector<uint8_t> &data,
         std::cout << "Double incorrectly encoded\n";
         return {std::nullopt, index};
       }
-      std::cout << ">|Double: " << maybeDouble.value() << "|\n";
+      // std::cout << ">|Double: " << maybeDouble.value() << "|\n";
       msg.set(fieldName, maybeDouble.value());
       index += 8;
       break;
@@ -164,7 +164,7 @@ decodeMessage(const std::vector<uint8_t> &data,
         std::cout << "String incorrectly encoded\n";
         return {std::nullopt, index};
       }
-      std::cout << ">|Str: " << maybeStr.value() << "|\n";
+      // std::cout << ">|Str: " << maybeStr.value() << "|\n";
       msg.set(fieldName, maybeStr.value());
       index = endStrIndex;
       break;
@@ -177,23 +177,4 @@ decodeMessage(const std::vector<uint8_t> &data,
   }
 
   return {msg, index};
-}
-
-int main() {
-  auto desc = std::make_shared<ProtoDesc>(std::vector<FieldDesc>{
-      {"id", 1, FieldType::Int},
-      {"value", 2, FieldType::Double},
-      {"name", 3, FieldType::String},
-  });
-
-  Message m(desc);
-  m.set("id", 1234566);
-  m.set("value", 123.45);
-  m.set("name", "testing");
-
-  std::vector<uint8_t> enc = encodeMessage(m);
-
-  std::cout << "Encoded message: " << enc << "\n";
-
-  auto [maybeMsg, _] = decodeMessage(enc, desc);
 }

@@ -1,12 +1,8 @@
 #include "encoder.h"
+#include "message_encoder.h"
 #include "proto_desc.h"
-#include <cstdint>
 #include <cstring>
 #include <gtest/gtest.h>
-#include <limits>
-#include <optional>
-#include <string>
-#include <vector>
 
 TEST(Varint, RoundTripKeyValues) {
   std::vector<uint64_t> vals = {
@@ -70,18 +66,10 @@ TEST(Varint, DecodesFromOffsetAndAdvances) {
 
 TEST(SignedVarint, RoundTripKeyValues) {
   std::vector<int64_t> vals = {
-      0LL,          1LL,
-      -1LL,         10LL,
-      -10LL,        127LL,
-      -127LL,       128LL,
-      -128LL,       129LL,
-      -129LL,       150LL,
-      -150LL,      16383LL,
-      -16383LL,    16384LL,
-      -16384LL,    (1LL << 31),
-      -(1LL << 31), (1LL << 32),
-      -(1LL << 32), INT64_MAX,
-      INT64_MIN};
+      0LL,          1LL,         -1LL,         10LL,      -10LL,    127LL,
+      -127LL,       128LL,       -128LL,       129LL,     -129LL,   150LL,
+      -150LL,       16383LL,     -16383LL,     16384LL,   -16384LL, (1LL << 31),
+      -(1LL << 31), (1LL << 32), -(1LL << 32), INT64_MAX, INT64_MIN};
 
   for (auto v : vals) {
     auto enc = encodeSignedVarint(v);
@@ -256,6 +244,159 @@ TEST(Message, OverwriteFieldKeepsLastValue) {
   auto id = m.get("id");
   ASSERT_TRUE(id.has_value());
   EXPECT_EQ(std::get<std::int64_t>(id->get()), 999);
+}
+
+TEST(MessageCodec, RoundTripBasic) {
+  auto desc = std::make_shared<ProtoDesc>(std::vector<FieldDesc>{
+      {"id", 1, FieldType::Int},
+      {"value", 2, FieldType::Double},
+      {"name", 3, FieldType::String},
+  });
+
+  Message m(desc);
+  ASSERT_TRUE(m.set("id", std::int64_t(1234566)));
+  ASSERT_TRUE(m.set("value", 123.45));
+  ASSERT_TRUE(m.set("name", std::string("testing")));
+
+  auto bytes = encodeMessage(m);
+  auto [decodedOpt, next] = decodeMessage(bytes, desc);
+
+  ASSERT_TRUE(decodedOpt.has_value());
+  EXPECT_EQ(next, (int)bytes.size());
+
+  const Message &d = *decodedOpt;
+
+  auto id = d.get("id");
+  ASSERT_TRUE(id.has_value());
+  EXPECT_EQ(std::get<std::int64_t>(id->get()), 1234566);
+
+  auto val = d.get("value");
+  ASSERT_TRUE(val.has_value());
+  EXPECT_DOUBLE_EQ(std::get<double>(val->get()), 123.45);
+
+  auto name = d.get("name");
+  ASSERT_TRUE(name.has_value());
+  EXPECT_EQ(std::get<std::string>(name->get()), "testing");
+}
+
+TEST(MessageCodec, SkipsUnknownVarintField) {
+  auto desc = std::make_shared<ProtoDesc>(std::vector<FieldDesc>{
+      {"id", 1, FieldType::Int},
+      {"name", 3, FieldType::String},
+  });
+
+  Message m(desc);
+  ASSERT_TRUE(m.set("id", std::int64_t(7)));
+  ASSERT_TRUE(m.set("name", std::string("ok")));
+
+  auto bytes = encodeMessage(m);
+
+  // Append an unknown field #99 with VARINT wire type and value 150.
+  // key = (99 << 3) | 0
+  auto key = encodeVarint((uint64_t(99) << 3) | uint64_t(WireType::VARINT));
+  auto val = encodeVarint(150);
+
+  bytes.insert(bytes.end(), key.begin(), key.end());
+  bytes.insert(bytes.end(), val.begin(), val.end());
+
+  auto [decodedOpt, next] = decodeMessage(bytes, desc);
+  ASSERT_TRUE(decodedOpt.has_value());
+  EXPECT_EQ(next, (int)bytes.size());
+
+  const Message &d = *decodedOpt;
+
+  auto id = d.get("id");
+  ASSERT_TRUE(id.has_value());
+  EXPECT_EQ(std::get<std::int64_t>(id->get()), 7);
+
+  auto name = d.get("name");
+  ASSERT_TRUE(name.has_value());
+  EXPECT_EQ(std::get<std::string>(name->get()), "ok");
+}
+
+TEST(MessageCodec, SkipsUnknownLenField) {
+  auto desc = std::make_shared<ProtoDesc>(std::vector<FieldDesc>{
+      {"id", 1, FieldType::Int},
+  });
+
+  Message m(desc);
+  ASSERT_TRUE(m.set("id", std::int64_t(42)));
+
+  auto bytes = encodeMessage(m);
+
+  // Append unknown field #50 length-delimited with payload "xyz".
+  auto key = encodeVarint((uint64_t(50) << 3) | uint64_t(WireType::LEN));
+  auto payload = encodeStr("xyz"); // includes length prefix
+  bytes.insert(bytes.end(), key.begin(), key.end());
+  bytes.insert(bytes.end(), payload.begin(), payload.end());
+
+  auto [decodedOpt, next] = decodeMessage(bytes, desc);
+  ASSERT_TRUE(decodedOpt.has_value());
+  EXPECT_EQ(next, (int)bytes.size());
+
+  auto id = decodedOpt->get("id");
+  ASSERT_TRUE(id.has_value());
+  EXPECT_EQ(std::get<std::int64_t>(id->get()), 42);
+}
+
+TEST(MessageCodec, RejectsKnownFieldWithWrongWireType) {
+  auto desc = std::make_shared<ProtoDesc>(std::vector<FieldDesc>{
+      {"id", 1, FieldType::Int},
+  });
+
+  // Manually craft: field #1 with LEN wire type (wrong), payload "a".
+  std::vector<uint8_t> bytes;
+  auto key = encodeVarint((uint64_t(1) << 3) | uint64_t(WireType::LEN));
+  auto payload = encodeStr("a");
+  bytes.insert(bytes.end(), key.begin(), key.end());
+  bytes.insert(bytes.end(), payload.begin(), payload.end());
+
+  auto [decodedOpt, next] = decodeMessage(bytes, desc);
+  EXPECT_FALSE(decodedOpt.has_value());
+  EXPECT_EQ(
+      next,
+      1); // your decode returns {nullopt, index} where index is current start
+}
+
+TEST(MessageCodec, RejectsTruncatedFixed64) {
+  auto desc = std::make_shared<ProtoDesc>(std::vector<FieldDesc>{
+      {"value", 2, FieldType::Double},
+  });
+
+  // key for field #2 fixed64, but provide only 3 bytes of the 8 required
+  std::vector<uint8_t> bytes;
+  auto key = encodeVarint((uint64_t(2) << 3) | uint64_t(WireType::I64));
+  bytes.insert(bytes.end(), key.begin(), key.end());
+  bytes.push_back(0x00);
+  bytes.push_back(0x01);
+  bytes.push_back(0x02);
+
+  auto [decodedOpt, next] = decodeMessage(bytes, desc);
+  EXPECT_FALSE(decodedOpt.has_value());
+}
+
+TEST(MessageCodec, RoundTripMissingFields) {
+  auto desc = std::make_shared<ProtoDesc>(std::vector<FieldDesc>{
+      {"id", 1, FieldType::Int},
+      {"value", 2, FieldType::Double},
+      {"name", 3, FieldType::String},
+  });
+
+  Message m(desc);
+  ASSERT_TRUE(m.set("name", std::string("only_name")));
+
+  auto bytes = encodeMessage(m);
+  auto [decodedOpt, next] = decodeMessage(bytes, desc);
+
+  ASSERT_TRUE(decodedOpt.has_value());
+  EXPECT_EQ(next, (int)bytes.size());
+
+  EXPECT_FALSE(decodedOpt->get("id").has_value());
+  EXPECT_FALSE(decodedOpt->get("value").has_value());
+
+  auto name = decodedOpt->get("name");
+  ASSERT_TRUE(name.has_value());
+  EXPECT_EQ(std::get<std::string>(name->get()), "only_name");
 }
 
 int main(int argc, char **argv) {
