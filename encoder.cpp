@@ -1,9 +1,6 @@
-#include <cstdint>
+#include "encoder.h"
 #include <cstring>
 #include <iostream>
-#include <optional>
-#include <string>
-#include <vector>
 
 // Overload << for std::vector<uint8_t> printing space separated hex values
 std::ostream &operator<<(std::ostream &os, const std::vector<uint8_t> &vec) {
@@ -113,7 +110,7 @@ decodeStr(const std::vector<uint8_t> &str, int index = 0) {
   if (!lengthOpt.has_value()) {
     return {std::nullopt, index};
   }
-  uint64_t length = lengthOpt.value();
+  int length = lengthOpt.value();
   if (newIndex + length > sz) {
     return {std::nullopt, index};
   }
@@ -121,18 +118,4 @@ decodeStr(const std::vector<uint8_t> &str, int index = 0) {
     res += static_cast<char>(str[i]);
   }
   return {res, static_cast<int>(newIndex + length)};
-}
-
-int main() {
-  std::vector<uint8_t> enc = encodeVarint(150);
-  std::cout << "Encode 150: " << enc << "\n";
-  std::cout << "Decode 150: " << decodeVarint(enc).first.value_or(-1) << "\n";
-
-  enc = encodeDouble(25.4);
-  std::cout << "Encode 25.4: " << enc << "\n";
-  std::cout << "Decode 25.4: " << decodeDouble(enc).value_or(-1) << "\n";
-  enc = encodeStr("testing");
-  std::cout << "Encode 'testing': " << enc << "\n";
-  std::cout << "Decode 'testing': " << decodeStr(enc).first.value_or("error")
-            << "\n";
 }
