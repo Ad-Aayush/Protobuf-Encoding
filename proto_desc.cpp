@@ -1,4 +1,5 @@
 #include "proto_desc.h"
+#include <iostream>
 #include <stdexcept>
 
 using Value = std::variant<std::int64_t, double, std::string>;
@@ -30,6 +31,15 @@ std::optional<size_t> ProtoDesc::indexByName(const std::string &name) const {
   auto it = nameToIndex.find(name);
   if (it == nameToIndex.end())
     return std::nullopt;
+  return it->second;
+}
+
+std::optional<size_t> ProtoDesc::indexByNumber(uint32_t number) const {
+  auto it = numberToIndex.find(number);
+  if (it == numberToIndex.end()) {
+    std::cout << "NUM: " << number << "\n";
+    return std::nullopt;
+  }
   return it->second;
 }
 

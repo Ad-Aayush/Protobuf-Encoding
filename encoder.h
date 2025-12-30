@@ -29,3 +29,5 @@ std::optional<double> decodeDouble(const std::vector<std::uint8_t> &, int);
 std::vector<std::uint8_t> encodeStr(const std::string &);
 std::pair<std::optional<std::string>, int>
 decodeStr(const std::vector<std::uint8_t> &, int);
+
+std::ostream &operator<<(std::ostream &os, const std::vector<uint8_t> &vec);

@@ -26,6 +26,7 @@ public:
   explicit ProtoDesc(std::vector<FieldDesc> flds);
   const FieldDesc *findByName(const std::string &name) const;
   std::optional<size_t> indexByName(const std::string &name) const;
+  std::optional<size_t> indexByNumber(uint32_t number) const;
 };
 
 class Message {
