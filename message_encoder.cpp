@@ -1,8 +1,6 @@
+#include "message_encoder.h"
 #include "encoder.h"
-#include "proto_desc.h"
-#include <cstdint>
 #include <iostream>
-#include <vector>
 
 std::vector<uint8_t> encodeMessage(const Message &m) {
   std::vector<uint8_t> enc;
@@ -15,7 +13,7 @@ std::vector<uint8_t> encodeMessage(const Message &m) {
     switch (field.type) {
     case FieldType::Int: {
       // Tag handling
-      uint32_t tag = (field.number << 3) | 0; // Wire type 0 for varint
+      uint32_t tag = (field.number << 3) | WireType::VARINT;
       std::vector<uint8_t> tagBytes = encodeVarint(tag);
       enc.insert(enc.end(), tagBytes.begin(), tagBytes.end());
       // Value handling
@@ -28,7 +26,7 @@ std::vector<uint8_t> encodeMessage(const Message &m) {
 
     case FieldType::Double: {
       // Tag handling
-      uint32_t tag = (field.number << 3) | 1; // Wire type 1 for 64-bit
+      uint32_t tag = (field.number << 3) | WireType::I64;
       std::vector<uint8_t> tagBytes = encodeVarint(tag);
       enc.insert(enc.end(), tagBytes.begin(), tagBytes.end());
       // Value handling
@@ -41,8 +39,7 @@ std::vector<uint8_t> encodeMessage(const Message &m) {
 
     case FieldType::String: {
       // Tag handling
-      uint32_t tag =
-          (field.number << 3) | 2; // Wire type 2 for length-delimited
+      uint32_t tag = (field.number << 3) | WireType::LEN;
       std::vector<uint8_t> tagBytes = encodeVarint(tag);
       enc.insert(enc.end(), tagBytes.begin(), tagBytes.end());
       // Value handling
@@ -64,7 +61,7 @@ std::vector<uint8_t> encodeMessage(const Message &m) {
   std::vector<uint8_t> lenPrefix = encodeVarint(enc.size());
   enc.insert(enc.begin(), lenPrefix.begin(), lenPrefix.end());
 
-  uint32_t tag = (0 << 3) | 2; // LEN type tag
+  uint32_t tag = (0 << 3) | WireType::LEN;
   std::vector<uint8_t> tagBytes = encodeVarint(tag);
   enc.insert(enc.begin(), tagBytes.begin(), tagBytes.end());
 
@@ -83,7 +80,7 @@ decodeMessage(const std::vector<uint8_t> &data,
     return {std::nullopt, index};
   }
 
-  uint32_t expectedTag = (0 << 3) | 2; // LEN type tag
+  uint32_t expectedTag = (0 << 3) | WireType::LEN; 
   if (maybeTag.value() != expectedTag) {
     std::cout << "Mismatch in tag\n";
     return {std::nullopt, index};
