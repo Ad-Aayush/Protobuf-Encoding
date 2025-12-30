@@ -1,152 +1,138 @@
-#include <algorithm>
 #include <cstdint>
 #include <cstring>
 #include <iostream>
 #include <optional>
 #include <string>
+#include <vector>
 
-std::string intToBits(int x) {
-  std::string str;
-  while (x) {
-    if (x % 2 == 1) {
-      str += '1';
-    } else {
-      str += '0';
+// Overload << for std::vector<uint8_t> printing space separated hex values
+std::ostream &operator<<(std::ostream &os, const std::vector<uint8_t> &vec) {
+  for (size_t i = 0; i < vec.size(); i++) {
+    // Ensure 2 hex digits are printed
+    if (vec[i] < 16) {
+      os << "0";
     }
-    x /= 2;
+    os << std::hex << static_cast<int>(vec[i]);
+    if (i != vec.size() - 1) {
+      os << " ";
+    }
   }
-  int sz = str.size();
-  for (int i = 0; i < 8 - sz; i++) {
-    str += '0';
-  }
-
-  std::reverse(str.begin(), str.end());
-  return str;
+  os << std::dec;
+  return os;
 }
 
-std::string encodeVarint(long long num) {
-  std::string enc;
-  while (num != 0) {
-    int rem = num % 128;
+std::vector<uint8_t> encodeVarint(uint64_t num) {
+  std::vector<uint8_t> enc;
+  do {
+    uint8_t rem = num & 0x7F;
     if (num > rem) {
-      enc += intToBits(rem | (1 << 7));
+      enc.push_back(rem | (1 << 7));
     } else {
-      enc += intToBits(rem);
+      enc.push_back(rem);
     }
-    num /= 128;
+    num >>= 7;
+  } while (num > 0);
+  return enc;
+}
+
+std::vector<uint8_t> encodeFixed64(uint64_t num) {
+  std::vector<uint8_t> enc;
+  for (int i = 0; i < 8; i++) {
+    enc.push_back((num >> (8 * i)) & 0xFF);
   }
   return enc;
 }
 
-std::string encodeI64(double num) {
-  std::string enc;
+std::vector<uint8_t> encodeDouble(double num) {
   uint64_t asInt;
   std::memcpy(&asInt, &num, sizeof(double));
-  for (int i = 0; i < 64; i++) {
-    if (asInt & (1ULL << (63 - i))) {
-      enc += '1';
-    } else {
-      enc += '0';
-    }
-  }
-  return enc;
+  return encodeFixed64(asInt);
 }
 
-std::string encodeStr(const std::string &str) {
-  std::string enc;
+std::vector<uint8_t> encodeStr(const std::string &str) {
+  std::vector<uint8_t> enc;
   int sz = str.size();
-  enc += intToBits(sz);
+  std::vector<uint8_t> lenEnc = encodeVarint(sz);
+  enc.insert(enc.end(), lenEnc.begin(), lenEnc.end());
   for (char c : str) {
-    enc += intToBits(static_cast<int>(c));
+    enc.push_back(static_cast<uint8_t>(c));
   }
   return enc;
 }
 
-std::pair<std::optional<long long>, int> decodeVarint(const std::string &str,
-                                                      int index = 0) {
+std::pair<std::optional<uint64_t>, int>
+decodeVarint(const std::vector<uint8_t> &str, int index = 0) {
+  uint64_t out = 0;
+  int shift = 0;
   int sz = str.size();
-  long long res = 0;
-  long long pow128 = 1;
-  for (; index < sz; index += 8) {
-    bool last = str[index] == '0';
-    long long partInt = 0;
-    long long pow2 = 64;
-    if (index + 8 > sz) {
-      return {std::nullopt, index};
+
+  for (int i = index, count = 0; i < sz && count <= 10; ++i, ++count) {
+    uint8_t b = str[i];
+    out |= uint64_t(b & 0x7F) << shift;
+
+    if ((b & 0x80) == 0) {
+      return {out, i + 1};
     }
-    for (int j = index + 1; j < index + 8; j++) {
-      if (str[j] == '1') {
-        partInt += pow2;
-      }
-      pow2 /= 2;
-    }
-    res += partInt * pow128;
-    pow128 *= 128;
-    if (last) {
+    shift += 7;
+    if (shift >= 64)
       break;
-    }
   }
-  return {res, index};
+  return {std::nullopt, index};
 }
 
-std::optional<double> decodeI64(const std::string &str, int index = 0) {
+std::optional<uint64_t> decodeFixed64(const std::vector<uint8_t> &str,
+                                      int index = 0) {
   int sz = str.size();
-  if (index + 64 > sz) {
+  if (index + 8 > sz) {
     return std::nullopt;
   }
-  uint64_t asInt = 0;
-  uint64_t pow2 = 1ULL << 63;
-  for (int i = index; i < index + 64; i++) {
-    if (str[i] == '1') {
-      asInt += pow2;
-    }
-    pow2 >>= 1;
+  uint64_t out = 0;
+  for (int i = index; i < index + 8; i++) {
+    out |= static_cast<uint64_t>(str[i]) << (8 * (i - index));
   }
-  double res;
-  std::memcpy(&res, &asInt, sizeof(double));
-  return res;
+  return out;
 }
 
-std::pair<std::optional<std::string>, int> decodeStr(const std::string &str,
-                                                     int index = 0) {
+std::optional<double> decodeDouble(const std::vector<uint8_t> &str,
+                                   int index = 0) {
+  auto fixedOpt = decodeFixed64(str, index);
+  if (!fixedOpt.has_value()) {
+    return std::nullopt;
+  }
+  uint64_t asInt = fixedOpt.value();
+  double out;
+  std::memcpy(&out, &asInt, sizeof(double));
+  return out;
+}
+
+std::pair<std::optional<std::string>, int>
+decodeStr(const std::vector<uint8_t> &str, int index = 0) {
   int sz = str.size();
   std::string res;
-  auto [maybeRecSz, newIndex] = decodeVarint(str, index);
-  if (!maybeRecSz.has_value()) {
+  auto [lengthOpt, newIndex] = decodeVarint(str, index);
+  if (!lengthOpt.has_value()) {
     return {std::nullopt, index};
   }
-  int recSz = *maybeRecSz;
-  std::cout << recSz << "\n";
-  index = newIndex;
-  res.reserve(recSz);
-  while (res.size() <= recSz) {
-    if (index + 8 > sz) {
-      return {std::nullopt, index};
-    }
-    int charInt = 0;
-    int pow2 = 128;
-    for (int j = index; j < index + 8; j++) {
-      if (str[j] == '1') {
-        charInt += pow2;
-      }
-      pow2 /= 2;
-    }
-    res += static_cast<char>(charInt);
-    index += 8;
+  uint64_t length = lengthOpt.value();
+  if (newIndex + length > sz) {
+    return {std::nullopt, index};
   }
-  return {res, index};
+  for (int i = newIndex; i < newIndex + length; i++) {
+    res += static_cast<char>(str[i]);
+  }
+  return {res, static_cast<int>(newIndex + length)};
 }
 
 int main() {
-  std::string enc = encodeVarint(150);
-  std::cout << enc << "\n";
-  std::cout << decodeVarint(enc).first.value_or(-1) << "\n";
+  std::vector<uint8_t> enc = encodeVarint(150);
+  std::cout << "Encode 150: " << enc << "\n";
+  std::cout << "Decode 150: " << decodeVarint(enc).first.value_or(-1) << "\n";
 
-  enc = encodeI64(164.25);
-  std::cout << enc << "\n";
-  std::cout << decodeI64(enc).value_or(-1) << "\n";
-
+  enc = encodeDouble(25.4);
+  std::cout << "Encode 25.4: " << enc << "\n";
+  std::cout << "Decode 25.4: " << decodeDouble(enc).value_or(-1) << "\n";
   enc = encodeStr("testing");
-  std::cout << enc << "\n";
-  std::cout << decodeStr(enc).first.value_or("error") << "\n";
+  std::cout << "Encode 'testing': " << enc << "\n";
+  std::cout << "Decode 'testing': " << decodeStr(enc).first.value_or("error")
+            << "\n";
 }
