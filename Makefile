@@ -9,7 +9,7 @@ LDLIBS := -pthread
 GTEST_DIR := third_party/googletest/googletest
 GTEST_SRCS := $(GTEST_DIR)/src/gtest-all.cc
 
-SRCS := encoder.cpp tests.cpp
+SRCS := encoder.cpp proto_desc.cpp tests.cpp
 BIN := tests_bin
 
 .PHONY: all test clean

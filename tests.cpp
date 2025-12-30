@@ -1,4 +1,5 @@
 #include "encoder.h"
+#include "proto_desc.h"
 #include <cstdint>
 #include <cstring>
 #include <gtest/gtest.h>
@@ -134,6 +135,103 @@ TEST(String, EmptyIsJustLengthZero) {
   ASSERT_TRUE(dec.has_value());
   EXPECT_EQ(*dec, "");
   EXPECT_EQ(next, (int)enc.size());
+}
+
+TEST(ProtoDesc, RejectDuplicateName) {
+  std::vector<FieldDesc> flds = {
+      {"a", 1, FieldType::Int},
+      {"a", 2, FieldType::Double},
+  };
+  EXPECT_THROW(ProtoDesc desc(flds), std::runtime_error);
+}
+
+TEST(ProtoDesc, RejectDuplicateNumber) {
+  std::vector<FieldDesc> flds = {
+      {"a", 1, FieldType::Int},
+      {"b", 1, FieldType::Double},
+  };
+  EXPECT_THROW(ProtoDesc desc(flds), std::runtime_error);
+}
+
+TEST(ProtoDesc, RejectZeroFieldNumber) {
+  std::vector<FieldDesc> flds = {
+      {"a", 0, FieldType::Int},
+  };
+  EXPECT_THROW(ProtoDesc desc(flds), std::runtime_error);
+}
+
+TEST(Message, SetGetHappyPath) {
+  auto desc = std::make_shared<ProtoDesc>(std::vector<FieldDesc>{
+      {"id", 1, FieldType::Int},
+      {"value", 2, FieldType::Double},
+      {"name", 3, FieldType::String},
+  });
+  Message m(desc);
+
+  EXPECT_TRUE(m.set("id", std::int64_t(42)));
+  EXPECT_TRUE(m.set("value", 3.14));
+  EXPECT_TRUE(m.set("name", std::string("x")));
+
+  auto id = m.get("id");
+  ASSERT_TRUE(id.has_value());
+  EXPECT_EQ(std::get<std::int64_t>(id->get()), 42);
+
+  auto value = m.get("value");
+  ASSERT_TRUE(value.has_value());
+  EXPECT_DOUBLE_EQ(std::get<double>(value->get()), 3.14);
+
+  auto name = m.get("name");
+  ASSERT_TRUE(name.has_value());
+  EXPECT_EQ(std::get<std::string>(name->get()), "x");
+}
+
+TEST(Message, GetUnsetReturnsNullopt) {
+  auto desc = std::make_shared<ProtoDesc>(std::vector<FieldDesc>{
+      {"id", 1, FieldType::Int},
+      {"name", 2, FieldType::String},
+  });
+  Message m(desc);
+
+  EXPECT_FALSE(m.get("id").has_value());   // known, but unset
+  EXPECT_FALSE(m.get("name").has_value()); // known, but unset
+}
+
+TEST(Message, UnknownFieldNameFailsGracefully) {
+  auto desc = std::make_shared<ProtoDesc>(std::vector<FieldDesc>{
+      {"id", 1, FieldType::Int},
+  });
+  Message m(desc);
+
+  EXPECT_FALSE(m.set("does_not_exist", std::int64_t(1)));
+  EXPECT_FALSE(m.get("does_not_exist").has_value());
+}
+
+TEST(Message, TypeMismatchRejected) {
+  auto desc = std::make_shared<ProtoDesc>(std::vector<FieldDesc>{
+      {"id", 1, FieldType::Int},
+      {"value", 2, FieldType::Double},
+      {"name", 3, FieldType::String},
+  });
+  Message m(desc);
+
+  EXPECT_FALSE(m.set("id", 3.14));                // double into int
+  EXPECT_FALSE(m.set("value", std::int64_t(10))); // int into double
+  EXPECT_FALSE(m.set("name", std::int64_t(7)));   // int into string
+  EXPECT_FALSE(m.set("name", 2.71));              // double into string
+}
+
+TEST(Message, OverwriteFieldKeepsLastValue) {
+  auto desc = std::make_shared<ProtoDesc>(std::vector<FieldDesc>{
+      {"id", 1, FieldType::Int},
+  });
+  Message m(desc);
+
+  EXPECT_TRUE(m.set("id", std::int64_t(1)));
+  EXPECT_TRUE(m.set("id", std::int64_t(999)));
+
+  auto id = m.get("id");
+  ASSERT_TRUE(id.has_value());
+  EXPECT_EQ(std::get<std::int64_t>(id->get()), 999);
 }
 
 int main(int argc, char **argv) {
