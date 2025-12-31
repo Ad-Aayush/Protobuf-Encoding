@@ -55,39 +55,142 @@ Message::get(const std::string &fieldName) const {
   return std::cref(*vals[idx]);
 }
 
+std::optional<std::reference_wrapper<const Value>>
+Message::getByIndex(const std::string &fieldName, size_t idx) const {
+  auto maybeIdx = desc->indexByName(fieldName);
+  if (!maybeIdx.has_value()) {
+    std::cerr << "Field name not found: " << fieldName << "\n";
+    return std::nullopt;
+  }
+  size_t fieldIdx = *maybeIdx;
+  const FieldDesc &fd = desc->fields[fieldIdx];
+  if (!fd.isRepeated) {
+    std::cerr << "Field is not repeated: " << fieldName << "\n";
+    return std::nullopt;
+  }
+  if (!vals[fieldIdx].has_value()) {
+    std::cerr << "No value set for field: " << fieldName << "\n";
+    return std::nullopt;
+  }
+  const Value &v = *vals[fieldIdx];
+  if (!std::holds_alternative<RepeatedVal>(v)) {
+    std::cerr << "Value is not repeated for field: " << fieldName << "\n";
+    return std::nullopt;
+  }
+  const RepeatedVal &rv = std::get<RepeatedVal>(v);
+  if (idx >= rv.values.size()) {
+    std::cerr << "Index out of bounds for field: " << fieldName << "\n";
+    return std::nullopt;
+  }
+  return std::cref(rv.values[idx]);
+}
+
 bool Message::set(const std::string &fieldName, Value v) {
   std::optional<size_t> maybeIdx = desc->indexByName(fieldName);
   if (!maybeIdx.has_value())
     return false;
   size_t idx = *maybeIdx;
   const FieldDesc &fd = desc->fields[idx];
+  if (fd.isRepeated) {
+    // Expecting a RepeatedVal
+    if (!std::holds_alternative<RepeatedVal>(v))
+      return false;
+    const RepeatedVal &rv = std::get<RepeatedVal>(v);
+    if (rv.elemType != fd.type)
+      return false;
+  } else {
+    // Type check
+    switch (fd.type) {
+    case FieldType::Int:
+      if (!std::holds_alternative<std::int64_t>(v))
+        return false;
+      break;
+    case FieldType::Double:
+      if (!std::holds_alternative<double>(v))
+        return false;
+      break;
+    case FieldType::String:
+      if (!std::holds_alternative<std::string>(v))
+        return false;
+      break;
+    case FieldType::UInt:
+      if (!std::holds_alternative<std::uint64_t>(v))
+        return false;
+      break;
+    case FieldType::Bool:
+      if (!std::holds_alternative<bool>(v))
+        return false;
+      break;
+    default:
+      return false;
+    }
+  }
+  vals[idx] = std::move(v);
+  return true;
+}
 
-  // Type check
-  switch (fd.type) {
-  case FieldType::Int:
-    if (!std::holds_alternative<std::int64_t>(v))
-      return false;
-    break;
-  case FieldType::Double:
-    if (!std::holds_alternative<double>(v))
-      return false;
-    break;
-  case FieldType::String:
-    if (!std::holds_alternative<std::string>(v))
-      return false;
-    break;
-  case FieldType::UInt:
-    if (!std::holds_alternative<std::uint64_t>(v))
-      return false;
-    break;
-  case FieldType::Bool:
-    if (!std::holds_alternative<bool>(v))
-      return false;
-    break;
-  default:
+bool Message::setByIndex(const std::string &fieldName, size_t idx, Value v) {
+  auto maybeIdx = desc->indexByName(fieldName);
+  if (!maybeIdx.has_value()) {
+    std::cerr << "Field name not found: " << fieldName << "\n";
     return false;
   }
+  size_t fieldIdx = *maybeIdx;
+  const FieldDesc &fd = desc->fields[fieldIdx];
+  if (!fd.isRepeated) {
+    std::cerr << "Field is not repeated: " << fieldName << "\n";
+    return false;
+  }
+  if (!vals[fieldIdx].has_value()) {
+    std::cerr << "No value set for field: " << fieldName << "\n";
+    return false;
+  }
+  Value &fieldValue = *vals[fieldIdx];
+  if (!std::holds_alternative<RepeatedVal>(fieldValue)) {
+    std::cerr << "Value is not repeated for field: " << fieldName << "\n";
+    return false;
+  }
+  RepeatedVal &rv = std::get<RepeatedVal>(fieldValue);
+  if (idx >= rv.values.size()) {
+    std::cerr << "Index out of bounds for field: " << fieldName << "\n";
+    return false;
+  }
+  if (rv.elemType != fd.type) {
+    std::cerr << "Element type mismatch for field: " << fieldName << "\n";
+    return false;
+  }
+  rv.values[idx] = std::move(v);
+  return true;
+}
 
-  vals[idx] = std::move(v);
+bool Message::push(const std::string &fieldName, Value v) {
+  auto maybeIdx = desc->indexByName(fieldName);
+  if (!maybeIdx.has_value()) {
+    std::cerr << "Field name not found: " << fieldName << "\n";
+    return false;
+  }
+  size_t fieldIdx = *maybeIdx;
+  const FieldDesc &fd = desc->fields[fieldIdx];
+  if (!fd.isRepeated) {
+    std::cerr << "Field is not repeated: " << fieldName << "\n";
+    return false;
+  }
+  if (!vals[fieldIdx].has_value()) {
+    // Initialize RepeatedVal if not present
+    RepeatedVal rv;
+    rv.elemType = fd.type;
+    vals[fieldIdx] = rv;
+  }
+  Value &fieldValue = *vals[fieldIdx];
+  if (!std::holds_alternative<RepeatedVal>(fieldValue)) {
+    std::cerr << "Value is not repeated for field: " << fieldName << "\n";
+    return false;
+  }
+  RepeatedVal &rv = std::get<RepeatedVal>(fieldValue);
+  if (rv.elemType != fd.type) {
+    std::cerr << "Element type mismatch for field: " << fieldName << "\n";
+    return false;
+  }
+  rv.values.push_back(std::move(v));
   return true;
 }

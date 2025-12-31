@@ -179,6 +179,7 @@ TEST(Message, SetGetHappyPath) {
       {"name", 3, FieldType::String},
       {"count", 4, FieldType::UInt},
       {"active", 5, FieldType::Bool},
+      {"tags", 6, FieldType::UInt, /*repeated=*/true},
   });
   Message m(desc);
 
@@ -187,6 +188,8 @@ TEST(Message, SetGetHappyPath) {
   EXPECT_TRUE(m.set("name", std::string("x")));
   EXPECT_TRUE(m.set("count", std::uint64_t(100)));
   EXPECT_TRUE(m.set("active", true));
+  EXPECT_TRUE(m.push("tags", std::uint64_t(1)));
+  EXPECT_TRUE(m.push("tags", std::uint64_t(2)));
 
   auto id = m.get("id");
   ASSERT_TRUE(id.has_value());
@@ -207,6 +210,22 @@ TEST(Message, SetGetHappyPath) {
   auto active = m.get("active");
   ASSERT_TRUE(active.has_value());
   EXPECT_EQ(std::get<bool>(active->get()), true);
+
+  auto tag_1 = m.getByIndex("tags", 0);
+  ASSERT_TRUE(tag_1.has_value());
+  EXPECT_EQ(std::get<std::uint64_t>(tag_1->get()), uint64_t(1));
+
+  auto tag_2 = m.getByIndex("tags", 1);
+  ASSERT_TRUE(tag_2.has_value());
+  EXPECT_EQ(std::get<std::uint64_t>(tag_2->get()), uint64_t(2));
+
+  auto tag_3 = m.getByIndex("tags", 2);
+  EXPECT_FALSE(tag_3.has_value());
+
+  m.setByIndex("tags", 1, std::uint64_t(42));
+  auto tag_2_updated = m.getByIndex("tags", 1);
+  ASSERT_TRUE(tag_2_updated.has_value());
+  EXPECT_EQ(std::get<std::uint64_t>(tag_2_updated->get()), uint64_t(42));
 }
 
 TEST(Message, GetUnsetReturnsNullopt) {
@@ -259,13 +278,13 @@ TEST(Message, OverwriteFieldKeepsLastValue) {
 }
 
 TEST(MessageCodec, RoundTripBasic) {
-  auto desc = std::make_shared<ProtoDesc>(std::vector<FieldDesc>{
-      {"id", 1, FieldType::Int},
-      {"value", 2, FieldType::Double},
-      {"name", 3, FieldType::String},
-      {"count", 4, FieldType::UInt},
-      {"active", 5, FieldType::Bool},
-  });
+  auto desc = std::make_shared<ProtoDesc>(
+      std::vector<FieldDesc>{{"id", 1, FieldType::Int},
+                             {"value", 2, FieldType::Double},
+                             {"name", 3, FieldType::String},
+                             {"count", 4, FieldType::UInt},
+                             {"active", 5, FieldType::Bool},
+                             {"tags", 6, FieldType::Int, /*repeated=*/true}});
 
   Message m(desc);
   ASSERT_TRUE(m.set("id", std::int64_t(1234566)));
@@ -273,8 +292,11 @@ TEST(MessageCodec, RoundTripBasic) {
   ASSERT_TRUE(m.set("name", std::string("testing")));
   ASSERT_TRUE(m.set("count", std::uint64_t(7890)));
   ASSERT_TRUE(m.set("active", false));
+  ASSERT_TRUE(m.push("tags", std::int64_t(10)));
+  ASSERT_TRUE(m.push("tags", std::int64_t(20)));
 
   auto bytes = encodeMessage(m);
+  // std::cout << ".|" << bytes.size() << "|.\n";
   auto [decodedOpt, next] = decodeMessage(bytes, desc);
 
   ASSERT_TRUE(decodedOpt.has_value());
@@ -301,6 +323,14 @@ TEST(MessageCodec, RoundTripBasic) {
   auto active = d.get("active");
   ASSERT_TRUE(active.has_value());
   EXPECT_EQ(std::get<bool>(active->get()), false);
+
+  auto tag_1 = d.getByIndex("tags", 0);
+  ASSERT_TRUE(tag_1.has_value());
+  EXPECT_EQ(std::get<std::int64_t>(tag_1->get()), 10);
+
+  auto tag_2 = d.getByIndex("tags", 1);
+  ASSERT_TRUE(tag_2.has_value());
+  EXPECT_EQ(std::get<std::int64_t>(tag_2->get()), 20);
 }
 
 TEST(MessageCodec, SkipsUnknownVarintField) {
