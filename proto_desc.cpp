@@ -2,8 +2,6 @@
 #include <iostream>
 #include <stdexcept>
 
-using Value = std::variant<std::int64_t, double, std::string>;
-
 ProtoDesc::ProtoDesc(std::vector<FieldDesc> flds) : fields(std::move(flds)) {
   nameToIndex.reserve(fields.size());
   numberToIndex.reserve(fields.size());
@@ -76,6 +74,10 @@ bool Message::set(const std::string &fieldName, Value v) {
     break;
   case FieldType::String:
     if (!std::holds_alternative<std::string>(v))
+      return false;
+    break;
+  case FieldType::UInt:
+    if (!std::holds_alternative<std::uint64_t>(v))
       return false;
     break;
   default:

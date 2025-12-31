@@ -177,12 +177,14 @@ TEST(Message, SetGetHappyPath) {
       {"id", 1, FieldType::Int},
       {"value", 2, FieldType::Double},
       {"name", 3, FieldType::String},
+      {"count", 4, FieldType::UInt},
   });
   Message m(desc);
 
   EXPECT_TRUE(m.set("id", std::int64_t(42)));
   EXPECT_TRUE(m.set("value", 3.14));
   EXPECT_TRUE(m.set("name", std::string("x")));
+  EXPECT_TRUE(m.set("count", std::uint64_t(100)));
 
   auto id = m.get("id");
   ASSERT_TRUE(id.has_value());
@@ -195,6 +197,10 @@ TEST(Message, SetGetHappyPath) {
   auto name = m.get("name");
   ASSERT_TRUE(name.has_value());
   EXPECT_EQ(std::get<std::string>(name->get()), "x");
+
+  auto count = m.get("count");
+  ASSERT_TRUE(count.has_value());
+  EXPECT_EQ(std::get<std::uint64_t>(count->get()), uint64_t(100));
 }
 
 TEST(Message, GetUnsetReturnsNullopt) {
@@ -251,12 +257,14 @@ TEST(MessageCodec, RoundTripBasic) {
       {"id", 1, FieldType::Int},
       {"value", 2, FieldType::Double},
       {"name", 3, FieldType::String},
+      {"count", 4, FieldType::UInt},
   });
 
   Message m(desc);
   ASSERT_TRUE(m.set("id", std::int64_t(1234566)));
   ASSERT_TRUE(m.set("value", 123.45));
   ASSERT_TRUE(m.set("name", std::string("testing")));
+  ASSERT_TRUE(m.set("count", std::uint64_t(7890)));
 
   auto bytes = encodeMessage(m);
   auto [decodedOpt, next] = decodeMessage(bytes, desc);
@@ -277,6 +285,10 @@ TEST(MessageCodec, RoundTripBasic) {
   auto name = d.get("name");
   ASSERT_TRUE(name.has_value());
   EXPECT_EQ(std::get<std::string>(name->get()), "testing");
+
+  auto count = d.get("count");
+  ASSERT_TRUE(count.has_value());
+  EXPECT_EQ(std::get<std::uint64_t>(count->get()), 7890u);
 }
 
 TEST(MessageCodec, SkipsUnknownVarintField) {

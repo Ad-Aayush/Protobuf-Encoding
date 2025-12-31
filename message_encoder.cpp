@@ -51,6 +51,20 @@ std::vector<uint8_t> encodeMessage(const Message &m) {
       break;
     }
 
+    case FieldType::UInt: {
+      // Tag handling
+      uint64_t tag =
+          static_cast<uint64_t>((field.number << 3) | WireType::VARINT);
+      std::vector<uint8_t> tagBytes = encodeVarint(tag);
+      enc.insert(enc.end(), tagBytes.begin(), tagBytes.end());
+      // Value handling
+      const Value &val = maybeValue->get();
+      std::uint64_t uintVal = std::get<std::uint64_t>(val);
+      std::vector<uint8_t> valueBytes = encodeVarint(uintVal);
+      enc.insert(enc.end(), valueBytes.begin(), valueBytes.end());
+      break;
+    }
+
     default: {
       std::cerr << "Unsupported field type for encoding\n";
       exit(1);
@@ -167,6 +181,21 @@ decodeMessage(const std::vector<uint8_t> &data,
       // std::cout << ">|Str: " << maybeStr.value() << "|\n";
       msg.set(fieldName, maybeStr.value());
       index = endStrIndex;
+      break;
+    }
+    case FieldType::UInt: {
+      if (wireType != 0) {
+        std::cout << "Mismatch in wire type\n";
+        return {std::nullopt, index};
+      }
+      auto [maybeUInt, endUIntIndex] = decodeVarint(data, index);
+      if (!maybeUInt.has_value()) {
+        std::cout << "Unsigned Integer incorrectly encoded\n";
+        return {std::nullopt, index};
+      }
+      // std::cout << ">|UInt: " << maybeUInt.value() << "|\n";
+      msg.set(fieldName, maybeUInt.value());
+      index = endUIntIndex;
       break;
     }
 

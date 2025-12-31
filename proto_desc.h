@@ -8,8 +8,8 @@
 #include <variant>
 #include <vector>
 
-enum class FieldType { Int, Double, String };
-using Value = std::variant<std::int64_t, double, std::string>;
+enum class FieldType { Int, Double, String, UInt };
+using Value = std::variant<int64_t, double, std::string, uint64_t>;
 
 struct FieldDesc {
   std::string name;
