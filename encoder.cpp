@@ -46,10 +46,24 @@ std::vector<uint8_t> encodeFixed64(uint64_t num) {
   return enc;
 }
 
+std::vector<uint8_t> encodeFixed32(uint32_t num) {
+  std::vector<uint8_t> enc;
+  for (int i = 0; i < 4; i++) {
+    enc.push_back((num >> (8 * i)) & 0xFF);
+  }
+  return enc;
+}
+
 std::vector<uint8_t> encodeDouble(double num) {
   uint64_t asInt;
   std::memcpy(&asInt, &num, sizeof(double));
   return encodeFixed64(asInt);
+}
+
+std::vector<uint8_t> encodeFloat(float num) {
+  uint32_t asInt;
+  std::memcpy(&asInt, &num, sizeof(float));
+  return encodeFixed32(asInt);
 }
 
 std::vector<uint8_t> encodeStr(const std::string &str) {
@@ -60,6 +74,14 @@ std::vector<uint8_t> encodeStr(const std::string &str) {
   for (char c : str) {
     enc.push_back(static_cast<uint8_t>(c));
   }
+  return enc;
+}
+
+std::vector<uint8_t> encodeBytes(const std::vector<uint8_t> &bytes) {
+  std::vector<uint8_t> enc;
+  std::vector<uint8_t> lenEnc = encodeVarint(bytes.size());
+  enc.insert(enc.end(), lenEnc.begin(), lenEnc.end());
+  enc.insert(enc.end(), bytes.begin(), bytes.end());
   return enc;
 }
 
@@ -109,6 +131,19 @@ std::optional<uint64_t> decodeFixed64(const std::vector<uint8_t> &str,
   return out;
 }
 
+std::optional<uint32_t> decodeFixed32(const std::vector<uint8_t> &str,
+                                      int index = 0) {
+  int sz = str.size();
+  if (index + 4 > sz) {
+    return std::nullopt;
+  }
+  uint32_t out = 0;
+  for (int i = index; i < index + 4; i++) {
+    out |= static_cast<uint32_t>(str[i]) << (8 * (i - index));
+  }
+  return out;
+}
+
 std::optional<double> decodeDouble(const std::vector<uint8_t> &str,
                                    int index = 0) {
   auto fixedOpt = decodeFixed64(str, index);
@@ -118,6 +153,18 @@ std::optional<double> decodeDouble(const std::vector<uint8_t> &str,
   uint64_t asInt = fixedOpt.value();
   double out;
   std::memcpy(&out, &asInt, sizeof(double));
+  return out;
+}
+
+std::optional<float> decodeFloat(const std::vector<uint8_t> &str,
+                                 int index = 0) {
+  auto fixedOpt = decodeFixed32(str, index);
+  if (!fixedOpt.has_value()) {
+    return std::nullopt;
+  }
+  uint32_t asInt = fixedOpt.value();
+  float out;
+  std::memcpy(&out, &asInt, sizeof(float));
   return out;
 }
 
@@ -136,5 +183,21 @@ decodeStr(const std::vector<uint8_t> &str, int index = 0) {
   for (int i = newIndex; i < newIndex + length; i++) {
     res += static_cast<char>(str[i]);
   }
+  return {res, static_cast<int>(newIndex + length)};
+}
+
+std::pair<std::optional<std::vector<uint8_t>>, int>
+decodeBytes(const std::vector<uint8_t> &str, int index = 0) {
+  int sz = str.size();
+  auto [lengthOpt, newIndex] = decodeVarint(str, index);
+  if (!lengthOpt.has_value()) {
+    return {std::nullopt, index};
+  }
+  int length = lengthOpt.value();
+  if (newIndex + length > sz) {
+    return {std::nullopt, index};
+  }
+  std::vector<uint8_t> res(str.begin() + newIndex,
+                           str.begin() + newIndex + length);
   return {res, static_cast<int>(newIndex + length)};
 }

@@ -58,6 +58,10 @@ static bool valueMatchesFieldType(FieldType type, const Value &v) {
     return std::holds_alternative<bool>(v);
   case FieldType::Message:
     return std::holds_alternative<Message>(v);
+  case FieldType::Float:
+    return std::holds_alternative<float>(v);
+  case FieldType::Bytes:
+    return std::holds_alternative<std::vector<uint8_t>>(v);
   default:
     return false;
   }
@@ -143,6 +147,14 @@ bool Message::set(const std::string &fieldName, Value v) {
       break;
     case FieldType::Message:
       if (!std::holds_alternative<Message>(v))
+        return false;
+      break;
+    case FieldType::Float:
+      if (!std::holds_alternative<float>(v))
+        return false;
+      break;
+    case FieldType::Bytes:
+      if (!std::holds_alternative<std::vector<uint8_t>>(v))
         return false;
       break;
     default:

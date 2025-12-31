@@ -1,7 +1,8 @@
 * **Finish wire-format coverage**
 
-  * Add `WireType::I32` handling in `skipUnknown` (and optionally deprecated groups 3/4).
-  * Add `FieldType::Bytes` (raw `std::vector<uint8_t>`) distinct from `String`.
+  * Add `WireType::I32` handling in `skipUnknown` (and optionally deprecated groups 3/4). (done)
+  * Add `FieldType::Bytes` (raw `std::vector<uint8_t>`) distinct from `String`. (done)
+  * Add `FieldType::Float` (fixed32). (done)
 
 * **Make decoding more protobuf-tolerant**
 

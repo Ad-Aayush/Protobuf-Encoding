@@ -11,9 +11,10 @@
 struct RepeatedVal;
 class ProtoDesc;
 class Message;
-enum class FieldType { Int, Double, String, UInt, Bool, Message };
+enum class FieldType { Int, Double, String, UInt, Bool, Message, Float, Bytes };
 using Value =
-    std::variant<int64_t, double, std::string, uint64_t, bool, RepeatedVal, Message>;
+    std::variant<int64_t, double, std::string, uint64_t, bool, RepeatedVal,
+                 Message, float, std::vector<uint8_t>>;
 
 struct RepeatedVal {
   FieldType elemType;

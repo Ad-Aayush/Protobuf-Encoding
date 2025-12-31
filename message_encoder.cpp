@@ -44,6 +44,12 @@ static inline bool skipUnknown(const std::vector<uint8_t> &data, int &idx,
     idx = afterLen + len;
     return true;
   }
+  case WireType::I32: {
+    if (idx + 4 > sz)
+      return false;
+    idx += 4;
+    return true;
+  }
   default:
     return false;
   }
@@ -209,6 +215,52 @@ static bool decMessage(const FieldDesc &fd, const std::vector<uint8_t> &in,
   return true;
 }
 
+// Float (fixed32 -> I32)
+static bool encFloat(const FieldDesc &fd, const Value &v,
+                     std::vector<uint8_t> &out) {
+  if (fd.type != FieldType::Float)
+    return false;
+  if (!std::holds_alternative<float>(v))
+    return false;
+  appendBytes(out, encodeFloat(std::get<float>(v)));
+  return true;
+}
+
+static bool decFloat(const FieldDesc &fd, const std::vector<uint8_t> &in,
+                     int &idx, Value &out) {
+  if (fd.type != FieldType::Float)
+    return false;
+  auto opt = decodeFloat(in, idx);
+  if (!opt.has_value())
+    return false;
+  out = opt.value();
+  idx += 4; // decodeFloat returns value but does not advance index
+  return true;
+}
+
+// Bytes (len-delimited -> LEN)
+static bool encBytes(const FieldDesc &fd, const Value &v,
+                     std::vector<uint8_t> &out) {
+  if (fd.type != FieldType::Bytes)
+    return false;
+  if (!std::holds_alternative<std::vector<uint8_t>>(v))
+    return false;
+  appendBytes(out, encodeBytes(std::get<std::vector<uint8_t>>(v)));
+  return true;
+}
+
+static bool decBytes(const FieldDesc &fd, const std::vector<uint8_t> &in,
+                     int &idx, Value &out) {
+  if (fd.type != FieldType::Bytes)
+    return false;
+  auto [opt, next] = decodeBytes(in, idx);
+  if (!opt.has_value())
+    return false;
+  out = opt.value();
+  idx = next;
+  return true;
+}
+
 static const Codec &codecFor(FieldType t) {
   static const Codec INT{VARINT, true, encInt, decInt};
   static const Codec DBL{I64, true, encDouble, decDouble};
@@ -216,6 +268,8 @@ static const Codec &codecFor(FieldType t) {
   static const Codec UINT{VARINT, true, encUInt, decUInt};
   static const Codec BOOL{VARINT, true, encBool, decBool};
   static const Codec MSG{LEN, false, encMessage, decMessage};
+  static const Codec FLT{I32, true, encFloat, decFloat};
+  static const Codec BYTES{LEN, false, encBytes, decBytes};
 
   switch (t) {
   case FieldType::Int:
@@ -230,6 +284,10 @@ static const Codec &codecFor(FieldType t) {
     return BOOL;
   case FieldType::Message:
     return MSG;
+  case FieldType::Float:
+    return FLT;
+  case FieldType::Bytes:
+    return BYTES;
   default:
     std::abort();
   }
@@ -370,6 +428,12 @@ decodeMessage(const std::vector<uint8_t> &data,
         if (fd.type == FieldType::Double) {
           if (index + 8 > end) {
             PB_LOG("Double overruns packed payload");
+            return {std::nullopt, index};
+          }
+        }
+        if (fd.type == FieldType::Float) {
+          if (index + 4 > end) {
+            PB_LOG("Float overruns packed payload");
             return {std::nullopt, index};
           }
         }

@@ -102,6 +102,19 @@ TEST(Fixed64, RoundTrip) {
   }
 }
 
+TEST(Fixed32, RoundTrip) {
+  std::vector<uint32_t> vals = {0U, 1U, 0x11223344U,
+                                std::numeric_limits<uint32_t>::max()};
+
+  for (auto v : vals) {
+    auto enc = encodeFixed32(v);
+    ASSERT_EQ(enc.size(), 4u);
+    auto dec = decodeFixed32(enc, 0);
+    ASSERT_TRUE(dec.has_value());
+    EXPECT_EQ(*dec, v);
+  }
+}
+
 TEST(Double, RoundTripCommon) {
   std::vector<double> vals = {0.0, -0.0, 1.0, -1.0, 25.4, 164.25, 1e-9, 1e9};
 
@@ -125,6 +138,32 @@ TEST(Double, RoundTripSpecial) {
     auto dec = decodeDouble(enc, 0);
     ASSERT_TRUE(dec.has_value());
     EXPECT_EQ(std::memcmp(&v, &(*dec), sizeof(double)), 0);
+  }
+}
+
+TEST(Float, RoundTripCommon) {
+  std::vector<float> vals = {0.0f, -0.0f, 1.0f, -1.0f, 25.4f, 164.25f, 1e-6f,
+                             1e6f};
+
+  for (float v : vals) {
+    auto enc = encodeFloat(v);
+    ASSERT_EQ(enc.size(), 4u);
+    auto dec = decodeFloat(enc, 0);
+    ASSERT_TRUE(dec.has_value());
+    EXPECT_EQ(std::memcmp(&v, &(*dec), sizeof(float)), 0);
+  }
+}
+
+TEST(Float, RoundTripSpecial) {
+  std::vector<float> vals = {std::numeric_limits<float>::infinity(),
+                             -std::numeric_limits<float>::infinity(),
+                             std::numeric_limits<float>::quiet_NaN()};
+
+  for (float v : vals) {
+    auto enc = encodeFloat(v);
+    auto dec = decodeFloat(enc, 0);
+    ASSERT_TRUE(dec.has_value());
+    EXPECT_EQ(std::memcmp(&v, &(*dec), sizeof(float)), 0);
   }
 }
 
@@ -156,6 +195,23 @@ TEST(String, EmptyIsJustLengthZero) {
   ASSERT_TRUE(dec.has_value());
   EXPECT_EQ(*dec, "");
   EXPECT_EQ(next, (int)enc.size());
+}
+
+TEST(Bytes, RoundTrip) {
+  std::vector<std::vector<uint8_t>> vals = {
+      {},
+      {0x00},
+      {0x01, 0x02, 0xFF},
+      std::vector<uint8_t>(200, 0xAB),
+  };
+
+  for (auto &b : vals) {
+    auto enc = encodeBytes(b);
+    auto [dec, next] = decodeBytes(enc, 0);
+    ASSERT_TRUE(dec.has_value());
+    EXPECT_EQ(*dec, b);
+    EXPECT_EQ(next, static_cast<int>(enc.size()));
+  }
 }
 
 TEST(ProtoDesc, RejectDuplicateName) {
@@ -702,6 +758,31 @@ TEST(MessageCodec, SkipsUnknownLenField) {
   EXPECT_EQ(std::get<std::int64_t>(id->get()), 42);
 }
 
+TEST(MessageCodec, SkipsUnknownFixed32Field) {
+  auto desc = std::make_shared<ProtoDesc>(std::vector<FieldDesc>{
+      {"id", 1, FieldType::Int},
+  });
+
+  Message m(desc);
+  ASSERT_TRUE(m.set("id", std::int64_t(42)));
+
+  auto bytes = encodeMessage(m);
+
+  // Append unknown field #77 with I32 wire type and 4-byte payload.
+  auto key = encodeVarint((uint64_t(77) << 3) | uint64_t(WireType::I32));
+  auto payload = encodeFixed32(0x11223344);
+  bytes.insert(bytes.end(), key.begin(), key.end());
+  bytes.insert(bytes.end(), payload.begin(), payload.end());
+
+  auto [decodedOpt, next] = decodeMessage(bytes, desc);
+  ASSERT_TRUE(decodedOpt.has_value());
+  EXPECT_EQ(next, (int)bytes.size());
+
+  auto id = decodedOpt->get("id");
+  ASSERT_TRUE(id.has_value());
+  EXPECT_EQ(std::get<std::int64_t>(id->get()), 42);
+}
+
 TEST(MessageCodec, RejectsKnownFieldWithWrongWireType) {
   auto desc = std::make_shared<ProtoDesc>(std::vector<FieldDesc>{
       {"id", 1, FieldType::Int},
@@ -772,6 +853,34 @@ TEST(MessageCodec, RoundTripMissingFields) {
   auto name = decodedOpt->get("name");
   ASSERT_TRUE(name.has_value());
   EXPECT_EQ(std::get<std::string>(name->get()), "only_name");
+}
+
+TEST(MessageCodec, RoundTripFloatAndBytes) {
+  auto desc = std::make_shared<ProtoDesc>(std::vector<FieldDesc>{
+      {"ratio", 1, FieldType::Float},
+      {"blob", 2, FieldType::Bytes},
+  });
+
+  Message m(desc);
+  ASSERT_TRUE(m.set("ratio", 3.5f));
+  std::vector<uint8_t> blob = {0x00, 0xAB, 0xCD};
+  ASSERT_TRUE(m.set("blob", blob));
+
+  auto bytes = encodeMessage(m);
+  auto [decodedOpt, next] = decodeMessage(bytes, desc);
+
+  ASSERT_TRUE(decodedOpt.has_value());
+  EXPECT_EQ(next, (int)bytes.size());
+
+  auto ratio = decodedOpt->get("ratio");
+  ASSERT_TRUE(ratio.has_value());
+  float expected = 3.5f;
+  float got = std::get<float>(ratio->get());
+  EXPECT_EQ(std::memcmp(&expected, &got, sizeof(float)), 0);
+
+  auto blobOut = decodedOpt->get("blob");
+  ASSERT_TRUE(blobOut.has_value());
+  EXPECT_EQ(std::get<std::vector<uint8_t>>(blobOut->get()), blob);
 }
 
 int main(int argc, char **argv) {
