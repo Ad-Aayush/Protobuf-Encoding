@@ -3,6 +3,7 @@
   * Add `WireType::I32` handling in `skipUnknown` (and optionally deprecated groups 3/4). (done)
   * Add `FieldType::Bytes` (raw `std::vector<uint8_t>`) distinct from `String`. (done)
   * Add `FieldType::Float` (fixed32). (done)
+  * Add `FieldType::Enum` (VARINT on wire) with enum descriptors + unknown numeric values.
 
 * **Make decoding more protobuf-tolerant**
 
