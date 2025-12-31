@@ -13,6 +13,11 @@ git clone https://github.com/google/googletest.git third_party/googletest
 make test
 ```
 
+## Build static library
+```bash
+make lib
+```
+
 ## Editor support
 Generate the compilation database used by language servers:
 

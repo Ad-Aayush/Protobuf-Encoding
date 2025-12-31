@@ -1,6 +1,6 @@
 CXX := g++
 CXXFLAGS := -std=c++20 -O0 -g -Wall -Wextra -Wpedantic
-CPPFLAGS := -I. \
+CPPFLAGS := -Iinclude \
             -Ithird_party/googletest/googletest/include \
             -Ithird_party/googletest/googletest
 DEBUG ?= 0
@@ -14,21 +14,28 @@ BUILD := build
 GTEST_DIR := third_party/googletest/googletest
 GTEST_SRC := $(GTEST_DIR)/src/gtest-all.cc
 
-SRCS_CPP := encoder.cpp proto_desc.cpp message_encoder.cpp tests.cpp
-SRCS := $(SRCS_CPP) $(GTEST_SRC)
+LIB_SRCS_CPP := src/encoder.cpp src/proto_desc.cpp src/message_encoder.cpp
+TEST_SRCS_CPP := tests/tests.cpp
+SRCS := $(LIB_SRCS_CPP) $(TEST_SRCS_CPP) $(GTEST_SRC)
 
 # Map source paths -> build/<source path>.o (preserves directories)
 OBJS := $(patsubst %,$(BUILD)/%.o,$(SRCS))
 DEPS := $(OBJS:.o=.d)
 
+LIB := $(BUILD)/libprotoenc.a
 BIN := tests_bin
 
-.PHONY: all test clean
+.PHONY: all test lib clean
 
 all: $(BIN)
 
-$(BIN): $(OBJS)
-	$(CXX) $(OBJS) $(LDLIBS) -o $@
+lib: $(LIB)
+
+$(LIB): $(patsubst %,$(BUILD)/%.o,$(LIB_SRCS_CPP))
+	ar rcs $@ $^
+
+$(BIN): $(patsubst %,$(BUILD)/%.o,$(TEST_SRCS_CPP)) $(LIB) $(BUILD)/$(GTEST_SRC).o
+	$(CXX) $^ $(LDLIBS) -o $@
 
 # Compile any .cpp into build/<path>.o
 $(BUILD)/%.cpp.o: %.cpp
