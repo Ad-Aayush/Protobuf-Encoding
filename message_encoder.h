@@ -2,7 +2,7 @@
 #include "proto_desc.h"
 #include <cstdint>
 
-enum WireType { VARINT, I64, LEN };
+enum WireType { VARINT = 0, I64 = 1, LEN = 2 };
 
 std::vector<uint8_t> encodeMessage(const Message &);
 
