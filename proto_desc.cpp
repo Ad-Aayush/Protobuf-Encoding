@@ -80,6 +80,10 @@ bool Message::set(const std::string &fieldName, Value v) {
     if (!std::holds_alternative<std::uint64_t>(v))
       return false;
     break;
+  case FieldType::Bool:
+    if (!std::holds_alternative<bool>(v))
+      return false;
+    break;
   default:
     return false;
   }

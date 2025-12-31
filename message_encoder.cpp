@@ -65,6 +65,21 @@ std::vector<uint8_t> encodeMessage(const Message &m) {
       break;
     }
 
+    case FieldType::Bool: {
+      // Tag handling
+      uint64_t tag =
+          static_cast<uint64_t>((field.number << 3) | WireType::VARINT);
+      std::vector<uint8_t> tagBytes = encodeVarint(tag);
+      enc.insert(enc.end(), tagBytes.begin(), tagBytes.end());
+      // Value handling
+      const Value &val = maybeValue->get();
+      bool boolVal = std::get<bool>(val);
+      uint64_t boolAsInt = boolVal ? 1 : 0;
+      std::vector<uint8_t> valueBytes = encodeVarint(boolAsInt);
+      enc.insert(enc.end(), valueBytes.begin(), valueBytes.end());
+      break;
+    }
+
     default: {
       std::cerr << "Unsupported field type for encoding\n";
       exit(1);
@@ -196,6 +211,28 @@ decodeMessage(const std::vector<uint8_t> &data,
       // std::cout << ">|UInt: " << maybeUInt.value() << "|\n";
       msg.set(fieldName, maybeUInt.value());
       index = endUIntIndex;
+      break;
+    }
+    case FieldType::Bool: {
+      if (wireType != 0) {
+        std::cout << "Mismatch in wire type\n";
+        return {std::nullopt, index};
+      }
+      auto [maybeBoolInt, endBoolIndex] = decodeVarint(data, index);
+      if (!maybeBoolInt.has_value()) {
+        std::cout << "Boolean incorrectly encoded\n";
+        return {std::nullopt, index};
+      }
+
+      if (maybeBoolInt.value() != 0 && maybeBoolInt.value() != 1) {
+        std::cout << "Boolean value not 0 or 1\n";
+        return {std::nullopt, index};
+      }
+
+      bool boolVal = maybeBoolInt.value() == 1;
+      // std::cout << ">|Bool: " << boolVal << "|\n";
+      msg.set(fieldName, boolVal);
+      index = endBoolIndex;
       break;
     }
 
