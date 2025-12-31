@@ -1,5 +1,6 @@
 #include "message_encoder.h"
 #include "encoder.h"
+#include "log.h"
 #include <cstdlib>
 #include <iostream>
 #include <variant>
@@ -296,7 +297,7 @@ decodeMessage(const std::vector<uint8_t> &data,
   while (index < sz) {
     auto [maybeFieldTag, afterTag] = decodeVarint(data, index);
     if (!maybeFieldTag.has_value()) {
-      std::cout << "No Tag for input field\n";
+      PB_LOG("No Tag for input field");
       return {std::nullopt, index};
     }
 
@@ -304,11 +305,14 @@ decodeMessage(const std::vector<uint8_t> &data,
     uint32_t fieldTag = static_cast<uint32_t>(maybeFieldTag.value());
     uint32_t fieldNumber = fieldTag >> 3;
     uint32_t wireRaw = fieldTag & 0x7;
+    if (fieldNumber == 0) {
+      return {std::nullopt, index};
+    }
 
     // Unknown field: skip it
     auto maybeFieldIndex = desc->indexByNumber(fieldNumber);
     if (!maybeFieldIndex.has_value()) {
-      std::cout << "Field Information not found skipping...\n";
+      PB_LOG("Field Information not found skipping...");
       int before = index;
       if (!skipUnknown(data, index, wireRaw))
         return {std::nullopt, before};
@@ -320,14 +324,14 @@ decodeMessage(const std::vector<uint8_t> &data,
 
     if (!fd.isRepeated) {
       if (wireRaw != static_cast<uint32_t>(c.scalarWire)) {
-        std::cout << "Mismatch in wire type\n";
+        PB_LOG("Mismatch in wire type");
         return {std::nullopt, index}; // index is start of value (matches tests)
       }
 
       int valueStart = index;
       Value out;
       if (!c.decodeOne(fd, data, index, out)) {
-        std::cout << "Scalar value incorrectly encoded\n";
+        PB_LOG("Scalar value incorrectly encoded");
         return {std::nullopt, valueStart};
       }
 
@@ -339,18 +343,18 @@ decodeMessage(const std::vector<uint8_t> &data,
 
     if (fd.isPacked) {
       if (wireRaw != static_cast<uint32_t>(WireType::LEN)) {
-        std::cout << "Mismatch in wire type for packed repeated field\n";
+        PB_LOG("Mismatch in wire type for packed repeated field");
         return {std::nullopt, index};
       }
       if (!c.packable) {
-        std::cout << "Packed encoding not allowed for this field type\n";
+        PB_LOG("Packed encoding not allowed for this field type");
         return {std::nullopt, index};
       }
 
       int lengthStart = index;
       auto [lenOpt, afterLen] = decodeVarint(data, index);
       if (!lenOpt.has_value()) {
-        std::cout << "Length not properly encoded for packed repeated field\n";
+        PB_LOG("Length not properly encoded for packed repeated field");
         return {std::nullopt, lengthStart};
       }
 
@@ -358,14 +362,14 @@ decodeMessage(const std::vector<uint8_t> &data,
       index = afterLen;
       int end = index + payloadLen;
       if (end > sz) {
-        std::cout << "Packed repeated field length exceeds data size\n";
+        PB_LOG("Packed repeated field length exceeds data size");
         return {std::nullopt, index};
       }
 
       while (index < end) {
         if (fd.type == FieldType::Double) {
           if (index + 8 > end) {
-            std::cout << "Double overruns packed payload\n";
+            PB_LOG("Double overruns packed payload");
             return {std::nullopt, index};
           }
         }
@@ -373,11 +377,11 @@ decodeMessage(const std::vector<uint8_t> &data,
         int elemStart = index;
         Value out;
         if (!c.decodeOne(fd, data, index, out)) {
-          std::cout << "Element incorrectly encoded in packed repeated field\n";
+          PB_LOG("Element incorrectly encoded in packed repeated field");
           return {std::nullopt, elemStart};
         }
         if (index > end) {
-          std::cout << "Element overruns packed payload\n";
+          PB_LOG("Element overruns packed payload");
           return {std::nullopt, elemStart};
         }
 
@@ -386,20 +390,20 @@ decodeMessage(const std::vector<uint8_t> &data,
       }
 
       if (index != end) {
-        std::cout << "Packed payload did not end on element boundary\n";
+        PB_LOG("Packed payload did not end on element boundary");
         return {std::nullopt, index};
       }
 
     } else {
       if (wireRaw != static_cast<uint32_t>(c.scalarWire)) {
-        std::cout << "Mismatch in wire type for repeated field\n";
+        PB_LOG("Mismatch in wire type for repeated field");
         return {std::nullopt, index};
       }
 
       int elemStart = index;
       Value out;
       if (!c.decodeOne(fd, data, index, out)) {
-        std::cout << "Element incorrectly encoded in repeated field\n";
+        PB_LOG("Element incorrectly encoded in repeated field");
         return {std::nullopt, elemStart};
       }
 

@@ -46,6 +46,15 @@ TEST(Varint, RejectTooLongVarint) {
   EXPECT_EQ(next, 0);
 }
 
+TEST(Varint, RejectTooLargeTenthByte) {
+  // 10th byte must only carry 1 payload bit for uint64.
+  std::vector<uint8_t> bad(10, 0x80);
+  bad.back() = 0x7F;
+  auto [dec, next] = decodeVarint(bad, 0);
+  EXPECT_FALSE(dec.has_value());
+  EXPECT_EQ(next, 0);
+}
+
 TEST(Varint, DecodesFromOffsetAndAdvances) {
   std::vector<uint8_t> buf;
   auto a = encodeVarint(150);
@@ -261,6 +270,31 @@ TEST(Message, TypeMismatchRejected) {
   EXPECT_FALSE(m.set("value", std::int64_t(10))); // int into double
   EXPECT_FALSE(m.set("name", std::int64_t(7)));   // int into string
   EXPECT_FALSE(m.set("name", 2.71));              // double into string
+}
+
+TEST(Message, RepeatedPushTypeMismatchRejected) {
+  auto desc = std::make_shared<ProtoDesc>(std::vector<FieldDesc>{
+      {"tags", 1, FieldType::Int, /*repeated=*/true},
+  });
+  Message m(desc);
+
+  EXPECT_FALSE(m.push("tags", std::string("nope")));
+  EXPECT_FALSE(m.push("tags", 3.14));
+  EXPECT_FALSE(m.get("tags").has_value());
+}
+
+TEST(Message, SetByIndexTypeMismatchRejected) {
+  auto desc = std::make_shared<ProtoDesc>(std::vector<FieldDesc>{
+      {"tags", 1, FieldType::Int, /*repeated=*/true},
+  });
+  Message m(desc);
+
+  ASSERT_TRUE(m.push("tags", std::int64_t(5)));
+  EXPECT_FALSE(m.setByIndex("tags", 0, std::string("bad")));
+
+  auto tag = m.getByIndex("tags", 0);
+  ASSERT_TRUE(tag.has_value());
+  EXPECT_EQ(std::get<std::int64_t>(tag->get()), 5);
 }
 
 TEST(Message, NestedMessageField) {
@@ -685,6 +719,18 @@ TEST(MessageCodec, RejectsKnownFieldWithWrongWireType) {
   EXPECT_EQ(
       next,
       1); // your decode returns {nullopt, index} where index is current start
+}
+
+TEST(MessageCodec, RejectsFieldNumberZero) {
+  // Tag 0 is invalid in protobuf.
+  std::vector<uint8_t> bytes = {0x00};
+  auto desc = std::make_shared<ProtoDesc>(std::vector<FieldDesc>{
+      {"id", 1, FieldType::Int},
+  });
+
+  auto [decodedOpt, next] = decodeMessage(bytes, desc);
+  EXPECT_FALSE(decodedOpt.has_value());
+  (void)next;
 }
 
 TEST(MessageCodec, RejectsTruncatedFixed64) {

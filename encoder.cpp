@@ -33,7 +33,9 @@ std::vector<uint8_t> encodeVarint(uint64_t num) {
 }
 
 std::vector<uint8_t> encodeSignedVarint(int64_t num) {
-  return encodeVarint(static_cast<uint64_t>((num << 1) ^ (num >> 63)));
+  uint64_t u = static_cast<uint64_t>(num);
+  uint64_t sign = static_cast<uint64_t>(-(num < 0));
+  return encodeVarint((u << 1) ^ sign);
 }
 
 std::vector<uint8_t> encodeFixed64(uint64_t num) {
@@ -67,16 +69,17 @@ decodeVarint(const std::vector<uint8_t> &str, int index = 0) {
   int shift = 0;
   int sz = str.size();
 
-  for (int i = index, count = 0; i < sz && count <= 10; ++i, ++count) {
+  for (int i = index, count = 0; i < sz && count < 10; ++i, ++count) {
     uint8_t b = str[i];
+    if (count == 9 && (b & 0xFE) != 0) {
+      return {std::nullopt, index};
+    }
     out |= uint64_t(b & 0x7F) << shift;
 
     if ((b & 0x80) == 0) {
       return {out, i + 1};
     }
     shift += 7;
-    if (shift >= 64)
-      break;
   }
   return {std::nullopt, index};
 }

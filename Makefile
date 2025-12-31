@@ -3,6 +3,10 @@ CXXFLAGS := -std=c++20 -O0 -g -Wall -Wextra -Wpedantic
 CPPFLAGS := -I. \
             -Ithird_party/googletest/googletest/include \
             -Ithird_party/googletest/googletest
+DEBUG ?= 0
+ifeq ($(DEBUG),1)
+CPPFLAGS += -DPROTO_DEBUG=1
+endif
 LDLIBS := -pthread
 
 BUILD := build
