@@ -51,19 +51,26 @@ static inline bool skipUnknown(const std::vector<uint8_t> &data, int &idx,
 struct Codec {
   WireType scalarWire; // wire type used for ONE scalar element
   bool packable;       // true for varint/fixed64 types, false for LEN types
-  bool (*encodeOne)(const Value &, std::vector<uint8_t> &out);
-  bool (*decodeOne)(const std::vector<uint8_t> &in, int &idx, Value &out);
+  bool (*encodeOne)(const FieldDesc &, const Value &, std::vector<uint8_t> &);
+  bool (*decodeOne)(const FieldDesc &, const std::vector<uint8_t> &, int &,
+                    Value &);
 };
 
 // Int (sint64 zigzag -> VARINT)
-static bool encInt(const Value &v, std::vector<uint8_t> &out) {
+static bool encInt(const FieldDesc &fd, const Value &v,
+                   std::vector<uint8_t> &out) {
+  if (fd.type != FieldType::Int)
+    return false;
   if (!std::holds_alternative<int64_t>(v))
     return false;
   appendBytes(out, encodeSignedVarint(std::get<int64_t>(v)));
   return true;
 }
 
-static bool decInt(const std::vector<uint8_t> &in, int &idx, Value &out) {
+static bool decInt(const FieldDesc &fd, const std::vector<uint8_t> &in,
+                   int &idx, Value &out) {
+  if (fd.type != FieldType::Int)
+    return false;
   auto [opt, next] = decodeSignedVarint(in, idx);
   if (!opt.has_value())
     return false;
@@ -73,14 +80,20 @@ static bool decInt(const std::vector<uint8_t> &in, int &idx, Value &out) {
 }
 
 // Double (fixed64 -> I64)
-static bool encDouble(const Value &v, std::vector<uint8_t> &out) {
+static bool encDouble(const FieldDesc &fd, const Value &v,
+                      std::vector<uint8_t> &out) {
+  if (fd.type != FieldType::Double)
+    return false;
   if (!std::holds_alternative<double>(v))
     return false;
   appendBytes(out, encodeDouble(std::get<double>(v)));
   return true;
 }
 
-static bool decDouble(const std::vector<uint8_t> &in, int &idx, Value &out) {
+static bool decDouble(const FieldDesc &fd, const std::vector<uint8_t> &in,
+                      int &idx, Value &out) {
+  if (fd.type != FieldType::Double)
+    return false;
   auto opt = decodeDouble(in, idx);
   if (!opt.has_value())
     return false;
@@ -90,14 +103,20 @@ static bool decDouble(const std::vector<uint8_t> &in, int &idx, Value &out) {
 }
 
 // String (len-delimited -> LEN)
-static bool encString(const Value &v, std::vector<uint8_t> &out) {
+static bool encString(const FieldDesc &fd, const Value &v,
+                      std::vector<uint8_t> &out) {
+  if (fd.type != FieldType::String)
+    return false;
   if (!std::holds_alternative<std::string>(v))
     return false;
   appendBytes(out, encodeStr(std::get<std::string>(v)));
   return true;
 }
 
-static bool decString(const std::vector<uint8_t> &in, int &idx, Value &out) {
+static bool decString(const FieldDesc &fd, const std::vector<uint8_t> &in,
+                      int &idx, Value &out) {
+  if (fd.type != FieldType::String)
+    return false;
   auto [opt, next] = decodeStr(in, idx);
   if (!opt.has_value())
     return false;
@@ -107,14 +126,20 @@ static bool decString(const std::vector<uint8_t> &in, int &idx, Value &out) {
 }
 
 // UInt (uint64 -> VARINT)
-static bool encUInt(const Value &v, std::vector<uint8_t> &out) {
+static bool encUInt(const FieldDesc &fd, const Value &v,
+                    std::vector<uint8_t> &out) {
+  if (fd.type != FieldType::UInt)
+    return false;
   if (!std::holds_alternative<uint64_t>(v))
     return false;
   appendBytes(out, encodeVarint(std::get<uint64_t>(v)));
   return true;
 }
 
-static bool decUInt(const std::vector<uint8_t> &in, int &idx, Value &out) {
+static bool decUInt(const FieldDesc &fd, const std::vector<uint8_t> &in,
+                    int &idx, Value &out) {
+  if (fd.type != FieldType::UInt)
+    return false;
   auto [opt, next] = decodeVarint(in, idx);
   if (!opt.has_value())
     return false;
@@ -124,7 +149,10 @@ static bool decUInt(const std::vector<uint8_t> &in, int &idx, Value &out) {
 }
 
 // Bool (bool -> VARINT with 0/1)
-static bool encBool(const Value &v, std::vector<uint8_t> &out) {
+static bool encBool(const FieldDesc &fd, const Value &v,
+                    std::vector<uint8_t> &out) {
+  if (fd.type != FieldType::Bool)
+    return false;
   if (!std::holds_alternative<bool>(v))
     return false;
   uint64_t b = std::get<bool>(v) ? 1 : 0;
@@ -132,7 +160,10 @@ static bool encBool(const Value &v, std::vector<uint8_t> &out) {
   return true;
 }
 
-static bool decBool(const std::vector<uint8_t> &in, int &idx, Value &out) {
+static bool decBool(const FieldDesc &fd, const std::vector<uint8_t> &in,
+                    int &idx, Value &out) {
+  if (fd.type != FieldType::Bool)
+    return false;
   auto [opt, next] = decodeVarint(in, idx);
   if (!opt.has_value())
     return false;
@@ -144,12 +175,46 @@ static bool decBool(const std::vector<uint8_t> &in, int &idx, Value &out) {
   return true;
 }
 
+static bool encMessage(const FieldDesc &fd, const Value &v,
+                       std::vector<uint8_t> &out) {
+  if (fd.type != FieldType::Message)
+    return false;
+  if (!std::holds_alternative<Message>(v))
+    return false;
+  const Message &m = std::get<Message>(v);
+  std::vector<uint8_t> encoded = encodeMessage(m);
+  appendBytes(out, encodeVarint(encoded.size()));
+  appendBytes(out, encoded);
+  return true;
+}
+
+static bool decMessage(const FieldDesc &fd, const std::vector<uint8_t> &in,
+                       int &idx, Value &out) {
+  if (fd.type != FieldType::Message)
+    return false;
+  auto [lenOpt, afterLen] = decodeVarint(in, idx);
+  if (!lenOpt.has_value())
+    return false;
+  int len = static_cast<int>(lenOpt.value());
+  idx = afterLen;
+  if (idx + len > static_cast<int>(in.size()))
+    return false;
+  std::vector<uint8_t> msgBytes(in.begin() + idx, in.begin() + idx + len);
+  auto [msgOpt, next] = decodeMessage(msgBytes, fd.nestedDesc);
+  if (!msgOpt.has_value())
+    return false;
+  out = msgOpt.value();
+  idx += len;
+  return true;
+}
+
 static const Codec &codecFor(FieldType t) {
   static const Codec INT{VARINT, true, encInt, decInt};
   static const Codec DBL{I64, true, encDouble, decDouble};
   static const Codec STR{LEN, false, encString, decString};
   static const Codec UINT{VARINT, true, encUInt, decUInt};
   static const Codec BOOL{VARINT, true, encBool, decBool};
+  static const Codec MSG{LEN, false, encMessage, decMessage};
 
   switch (t) {
   case FieldType::Int:
@@ -162,6 +227,8 @@ static const Codec &codecFor(FieldType t) {
     return UINT;
   case FieldType::Bool:
     return BOOL;
+  case FieldType::Message:
+    return MSG;
   default:
     std::abort();
   }
@@ -179,7 +246,7 @@ std::vector<uint8_t> encodeMessage(const Message &m) {
 
     if (!field.isRepeated) {
       appendTag(enc, field.number, c.scalarWire);
-      if (!c.encodeOne(maybeValue->get(), enc))
+      if (!c.encodeOne(field, maybeValue->get(), enc))
         std::abort();
       continue;
     }
@@ -201,7 +268,7 @@ std::vector<uint8_t> encodeMessage(const Message &m) {
 
       std::vector<uint8_t> payload;
       for (const auto &elem : rv.values) {
-        if (!c.encodeOne(elem, payload))
+        if (!c.encodeOne(field, elem, payload))
           std::abort();
       }
 
@@ -210,7 +277,7 @@ std::vector<uint8_t> encodeMessage(const Message &m) {
     } else {
       for (const auto &elem : rv.values) {
         appendTag(enc, field.number, c.scalarWire);
-        if (!c.encodeOne(elem, enc))
+        if (!c.encodeOne(field, elem, enc))
           std::abort();
       }
     }
@@ -259,7 +326,7 @@ decodeMessage(const std::vector<uint8_t> &data,
 
       int valueStart = index;
       Value out;
-      if (!c.decodeOne(data, index, out)) {
+      if (!c.decodeOne(fd, data, index, out)) {
         std::cout << "Scalar value incorrectly encoded\n";
         return {std::nullopt, valueStart};
       }
@@ -305,7 +372,7 @@ decodeMessage(const std::vector<uint8_t> &data,
 
         int elemStart = index;
         Value out;
-        if (!c.decodeOne(data, index, out)) {
+        if (!c.decodeOne(fd, data, index, out)) {
           std::cout << "Element incorrectly encoded in packed repeated field\n";
           return {std::nullopt, elemStart};
         }
@@ -331,7 +398,7 @@ decodeMessage(const std::vector<uint8_t> &data,
 
       int elemStart = index;
       Value out;
-      if (!c.decodeOne(data, index, out)) {
+      if (!c.decodeOne(fd, data, index, out)) {
         std::cout << "Element incorrectly encoded in repeated field\n";
         return {std::nullopt, elemStart};
       }

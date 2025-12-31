@@ -9,9 +9,11 @@
 #include <vector>
 
 struct RepeatedVal;
-enum class FieldType { Int, Double, String, UInt, Bool };
+class ProtoDesc;
+class Message;
+enum class FieldType { Int, Double, String, UInt, Bool, Message };
 using Value =
-    std::variant<int64_t, double, std::string, uint64_t, bool, RepeatedVal>;
+    std::variant<int64_t, double, std::string, uint64_t, bool, RepeatedVal, Message>;
 
 struct RepeatedVal {
   FieldType elemType;
@@ -26,10 +28,13 @@ struct FieldDesc {
   bool isRepeated;
   bool isPacked; // for repeated fields with packed encoding
 
+  std::shared_ptr<const ProtoDesc> nestedDesc; // for nested messages
+
   FieldDesc(std::string n, uint32_t num, FieldType t, bool repeated = false,
-            bool packed = true)
+            bool packed = true,
+            std::shared_ptr<const ProtoDesc> nested = nullptr)
       : name(std::move(n)), number(num), type(t), isRepeated(repeated),
-        isPacked(packed) {}
+        isPacked(packed), nestedDesc(std::move(nested)) {}
 };
 
 class ProtoDesc {

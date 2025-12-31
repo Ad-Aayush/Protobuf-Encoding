@@ -87,8 +87,9 @@ Message::getByIndex(const std::string &fieldName, size_t idx) const {
 
 bool Message::set(const std::string &fieldName, Value v) {
   std::optional<size_t> maybeIdx = desc->indexByName(fieldName);
-  if (!maybeIdx.has_value())
+  if (!maybeIdx.has_value()) {
     return false;
+  }
   size_t idx = *maybeIdx;
   const FieldDesc &fd = desc->fields[idx];
   if (fd.isRepeated) {
@@ -119,6 +120,10 @@ bool Message::set(const std::string &fieldName, Value v) {
       break;
     case FieldType::Bool:
       if (!std::holds_alternative<bool>(v))
+        return false;
+      break;
+    case FieldType::Message:
+      if (!std::holds_alternative<Message>(v))
         return false;
       break;
     default:

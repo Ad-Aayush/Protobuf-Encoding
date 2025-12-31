@@ -263,6 +263,27 @@ TEST(Message, TypeMismatchRejected) {
   EXPECT_FALSE(m.set("name", 2.71));              // double into string
 }
 
+TEST(Message, NestedMessageField) {
+  auto nestedDesc = std::make_shared<ProtoDesc>(std::vector<FieldDesc>{
+      {"nested_id", 1, FieldType::Int},
+  });
+
+  auto desc = std::make_shared<ProtoDesc>(std::vector<FieldDesc>{
+      {"id", 1, FieldType::Int},
+      {"nested_msg", 2, FieldType::Message, /*repeated=*/false,
+       /*packed=*/false, nestedDesc},
+  });
+
+  Message m(desc);
+
+  EXPECT_TRUE(m.set("id", std::int64_t(100)));
+
+  Message nestedMsg(nestedDesc);
+  EXPECT_TRUE(nestedMsg.set("nested_id", std::int64_t(200)));
+
+  EXPECT_TRUE(m.set("nested_msg", nestedMsg));
+}
+
 TEST(Message, OverwriteFieldKeepsLastValue) {
   auto desc = std::make_shared<ProtoDesc>(std::vector<FieldDesc>{
       {"id", 1, FieldType::Int},
@@ -391,6 +412,200 @@ TEST(MessageCodec, RoundTripRepeatedUnpackedString) {
   EXPECT_EQ(std::get<std::string>(n0->get()), "a");
   EXPECT_EQ(std::get<std::string>(n1->get()), "bb");
   EXPECT_EQ(std::get<std::string>(n2->get()), "");
+}
+
+static inline void append(std::vector<uint8_t> &out,
+                          const std::vector<uint8_t> &b) {
+  out.insert(out.end(), b.begin(), b.end());
+}
+
+TEST(MessageCodec, RoundTripNestedMessage) {
+  auto nestedDesc = std::make_shared<ProtoDesc>(std::vector<FieldDesc>{
+      {"nested_id", 1, FieldType::Int},
+  });
+
+  auto desc = std::make_shared<ProtoDesc>(std::vector<FieldDesc>{
+      {"id", 1, FieldType::Int},
+      {"nested_msg", 2, FieldType::Message, /*repeated=*/false,
+       /*packed=*/false, nestedDesc},
+  });
+
+  Message m(desc);
+  ASSERT_TRUE(m.set("id", int64_t(7)));
+
+  Message nested(nestedDesc);
+  ASSERT_TRUE(nested.set("nested_id", int64_t(123)));
+  ASSERT_TRUE(m.set("nested_msg", nested));
+
+  auto bytes = encodeMessage(m);
+  auto [decodedOpt, next] = decodeMessage(bytes, desc);
+
+  ASSERT_TRUE(decodedOpt.has_value());
+  EXPECT_EQ(next, (int)bytes.size());
+
+  auto id = decodedOpt->get("id");
+  ASSERT_TRUE(id.has_value());
+  EXPECT_EQ(std::get<int64_t>(id->get()), 7);
+
+  auto nm = decodedOpt->get("nested_msg");
+  ASSERT_TRUE(nm.has_value());
+  ASSERT_TRUE(std::holds_alternative<Message>(nm->get()));
+  const Message &dn = std::get<Message>(nm->get());
+
+  auto nid = dn.get("nested_id");
+  ASSERT_TRUE(nid.has_value());
+  EXPECT_EQ(std::get<int64_t>(nid->get()), 123);
+}
+
+TEST(MessageCodec, NestedMessageEncodingIsLengthDelimited) {
+  auto nestedDesc = std::make_shared<ProtoDesc>(std::vector<FieldDesc>{
+      {"nested_id", 1, FieldType::Int},
+  });
+
+  auto desc = std::make_shared<ProtoDesc>(std::vector<FieldDesc>{
+      {"nested_msg", 2, FieldType::Message, /*repeated=*/false,
+       /*packed=*/false, nestedDesc},
+  });
+
+  Message nested(nestedDesc);
+  ASSERT_TRUE(nested.set("nested_id", int64_t(200)));
+
+  Message m(desc);
+  ASSERT_TRUE(m.set("nested_msg", nested));
+
+  auto got = encodeMessage(m);
+
+  // Expected: key(field 2, LEN) + len(payload) + payload
+  auto payload = encodeMessage(nested);
+  std::vector<uint8_t> expected;
+  append(expected, encodeVarint((uint64_t(2) << 3) | uint64_t(WireType::LEN)));
+  append(expected, encodeVarint(payload.size()));
+  append(expected, payload);
+
+  EXPECT_EQ(got, expected);
+}
+
+TEST(MessageCodec, RoundTripRepeatedNestedMessages) {
+  auto childDesc = std::make_shared<ProtoDesc>(std::vector<FieldDesc>{
+      {"name", 1, FieldType::String},
+  });
+
+  auto parentDesc = std::make_shared<ProtoDesc>(std::vector<FieldDesc>{
+      {"children", 3, FieldType::Message, /*repeated=*/true,
+       /*packed=*/false, childDesc},
+  });
+
+  Message parent(parentDesc);
+
+  Message c1(childDesc);
+  Message c2(childDesc);
+  ASSERT_TRUE(c1.set("name", std::string("A")));
+  ASSERT_TRUE(c2.set("name", std::string("B")));
+
+  ASSERT_TRUE(parent.push("children", c1));
+  ASSERT_TRUE(parent.push("children", c2));
+
+  auto bytes = encodeMessage(parent);
+  auto [decodedOpt, next] = decodeMessage(bytes, parentDesc);
+
+  ASSERT_TRUE(decodedOpt.has_value());
+  EXPECT_EQ(next, (int)bytes.size());
+
+  auto e0 = decodedOpt->getByIndex("children", 0);
+  auto e1 = decodedOpt->getByIndex("children", 1);
+  ASSERT_TRUE(e0.has_value());
+  ASSERT_TRUE(e1.has_value());
+
+  ASSERT_TRUE(std::holds_alternative<Message>(e0->get()));
+  ASSERT_TRUE(std::holds_alternative<Message>(e1->get()));
+
+  const Message &d0 = std::get<Message>(e0->get());
+  const Message &d1 = std::get<Message>(e1->get());
+
+  auto n0 = d0.get("name");
+  auto n1 = d1.get("name");
+  ASSERT_TRUE(n0.has_value());
+  ASSERT_TRUE(n1.has_value());
+  EXPECT_EQ(std::get<std::string>(n0->get()), "A");
+  EXPECT_EQ(std::get<std::string>(n1->get()), "B");
+}
+
+TEST(MessageCodec, SkipsUnknownFieldInsideNestedMessage) {
+  auto nestedDesc = std::make_shared<ProtoDesc>(std::vector<FieldDesc>{
+      {"ok", 1, FieldType::String},
+  });
+
+  auto desc = std::make_shared<ProtoDesc>(std::vector<FieldDesc>{
+      {"nested_msg", 2, FieldType::Message, /*repeated=*/false,
+       /*packed=*/false, nestedDesc},
+  });
+
+  // Build nested payload: ok="x" plus unknown field #99 LEN "zz"
+  Message nested(nestedDesc);
+  ASSERT_TRUE(nested.set("ok", std::string("x")));
+  auto payload = encodeMessage(nested);
+  append(payload, encodeVarint((uint64_t(99) << 3) | uint64_t(WireType::LEN)));
+  append(payload, encodeStr("zz")); // includes its own length prefix
+
+  // Wrap as parent.nested_msg (LEN-delimited)
+  std::vector<uint8_t> bytes;
+  append(bytes, encodeVarint((uint64_t(2) << 3) | uint64_t(WireType::LEN)));
+  append(bytes, encodeVarint(payload.size()));
+  append(bytes, payload);
+
+  auto [decodedOpt, next] = decodeMessage(bytes, desc);
+  ASSERT_TRUE(decodedOpt.has_value());
+  EXPECT_EQ(next, (int)bytes.size());
+
+  auto nm = decodedOpt->get("nested_msg");
+  ASSERT_TRUE(nm.has_value());
+  ASSERT_TRUE(std::holds_alternative<Message>(nm->get()));
+  const Message &dn = std::get<Message>(nm->get());
+
+  auto ok = dn.get("ok");
+  ASSERT_TRUE(ok.has_value());
+  EXPECT_EQ(std::get<std::string>(ok->get()), "x");
+}
+
+TEST(MessageCodec, RejectsMessageFieldWithWrongWireType) {
+  auto nestedDesc = std::make_shared<ProtoDesc>(std::vector<FieldDesc>{
+      {"x", 1, FieldType::Int},
+  });
+
+  auto desc = std::make_shared<ProtoDesc>(std::vector<FieldDesc>{
+      {"nested_msg", 2, FieldType::Message, /*repeated=*/false,
+       /*packed=*/false, nestedDesc},
+  });
+
+  // Field #2 encoded with VARINT wire type (wrong for message)
+  std::vector<uint8_t> bytes;
+  append(bytes, encodeVarint((uint64_t(2) << 3) | uint64_t(WireType::VARINT)));
+  append(bytes, encodeVarint(1));
+
+  auto [decodedOpt, idx] = decodeMessage(bytes, desc);
+  EXPECT_FALSE(decodedOpt.has_value());
+  EXPECT_EQ(idx, 1); // start of value (right after tag)
+}
+
+TEST(MessageCodec, RejectsTruncatedNestedPayload) {
+  auto nestedDesc = std::make_shared<ProtoDesc>(std::vector<FieldDesc>{
+      {"x", 1, FieldType::Int},
+  });
+
+  auto desc = std::make_shared<ProtoDesc>(std::vector<FieldDesc>{
+      {"nested_msg", 2, FieldType::Message, /*repeated=*/false,
+       /*packed=*/false, nestedDesc},
+  });
+
+  // key(field 2, LEN) + length(10) but only 1 byte payload
+  std::vector<uint8_t> bytes;
+  append(bytes, encodeVarint((uint64_t(2) << 3) | uint64_t(WireType::LEN)));
+  append(bytes, encodeVarint(10));
+  bytes.push_back(0x00);
+
+  auto [decodedOpt, idx] = decodeMessage(bytes, desc);
+  EXPECT_FALSE(decodedOpt.has_value());
+  (void)idx; // avoid over-constraining error index if you change behavior later
 }
 
 TEST(MessageCodec, SkipsUnknownVarintField) {
