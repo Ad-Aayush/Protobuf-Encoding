@@ -333,6 +333,66 @@ TEST(MessageCodec, RoundTripBasic) {
   EXPECT_EQ(std::get<std::int64_t>(tag_2->get()), 20);
 }
 
+TEST(MessageCodec, RoundTripRepeatedUnpackedInt) {
+  auto desc = std::make_shared<ProtoDesc>(std::vector<FieldDesc>{
+      {"id", 1, FieldType::Int},
+      {"tags", 2, FieldType::Int, /*repeated=*/true, /*packed=*/false},
+  });
+
+  Message m(desc);
+  ASSERT_TRUE(m.set("id", int64_t(7)));
+  ASSERT_TRUE(m.push("tags", int64_t(10)));
+  ASSERT_TRUE(m.push("tags", int64_t(20)));
+  ASSERT_TRUE(m.push("tags", int64_t(-5)));
+
+  auto bytes = encodeMessage(m);
+  auto [decodedOpt, next] = decodeMessage(bytes, desc);
+
+  ASSERT_TRUE(decodedOpt.has_value());
+  EXPECT_EQ(next, (int)bytes.size());
+
+  auto t0 = decodedOpt->getByIndex("tags", 0);
+  auto t1 = decodedOpt->getByIndex("tags", 1);
+  auto t2 = decodedOpt->getByIndex("tags", 2);
+
+  ASSERT_TRUE(t0.has_value());
+  ASSERT_TRUE(t1.has_value());
+  ASSERT_TRUE(t2.has_value());
+
+  EXPECT_EQ(std::get<int64_t>(t0->get()), 10);
+  EXPECT_EQ(std::get<int64_t>(t1->get()), 20);
+  EXPECT_EQ(std::get<int64_t>(t2->get()), -5);
+}
+
+TEST(MessageCodec, RoundTripRepeatedUnpackedString) {
+  auto desc = std::make_shared<ProtoDesc>(std::vector<FieldDesc>{
+      {"names", 1, FieldType::String, /*repeated=*/true, /*packed=*/false},
+  });
+
+  Message m(desc);
+  ASSERT_TRUE(m.push("names", std::string("a")));
+  ASSERT_TRUE(m.push("names", std::string("bb")));
+  ASSERT_TRUE(m.push("names", std::string("")));
+
+  auto bytes = encodeMessage(m);
+  auto [decodedOpt, next] = decodeMessage(bytes, desc);
+
+  ASSERT_TRUE(decodedOpt.has_value());
+  EXPECT_EQ(next, (int)bytes.size());
+
+  auto n0 = decodedOpt->getByIndex("names", 0);
+  auto n1 = decodedOpt->getByIndex("names", 1);
+  auto n2 = decodedOpt->getByIndex("names", 2);
+
+  ASSERT_TRUE(n0.has_value());
+  ASSERT_TRUE(n1.has_value());
+  ASSERT_TRUE(n2.has_value());
+
+  EXPECT_EQ(std::get<std::string>(n0->get()), "a");
+  EXPECT_EQ(std::get<std::string>(n1->get()), "bb");
+  EXPECT_EQ(std::get<std::string>(n2->get()), "");
+}
+
 TEST(MessageCodec, SkipsUnknownVarintField) {
   auto desc = std::make_shared<ProtoDesc>(std::vector<FieldDesc>{
       {"id", 1, FieldType::Int},
